@@ -1,8 +1,6 @@
 // Maps theme tokens to the widget palette. Colors are converted to hex strings
 // because the span reconciler mishandles RGBA class instances on update, and
 // OpenTUI's own rgbToHex does the same conversion internally.
-import type { Severity } from "./format"
-
 export type Rgba = { toInts(): [number, number, number, number] }
 
 export type PaletteTokens = {
@@ -109,12 +107,4 @@ export function buildPalette(tokens: PaletteTokens, options: { accentOverride?: 
     success: toHex(tokens.success),
     divider: withAlpha(accent, 0.35),
   }
-}
-
-// Severity overrides the metric's own color, so "normal" keeps it colorful
-// while pressure states stay unmistakable.
-export function severityColor(palette: Palette, level: Severity, normal: string): string {
-  if (level === "danger") return palette.danger
-  if (level === "warning") return palette.warning
-  return normal
 }

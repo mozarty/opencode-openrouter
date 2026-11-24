@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -13,6 +16,20 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      # `npm install` until the lockfile is committed; switch to `npm ci` after.
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
+      - run: npm run check
       - run: npm test
+      - run: npm pack --dry-run
+
+  # The TUI loads this plugin on Bun, where credentials come from bun:sqlite.
+  # The Node suite cannot cover that driver, so it gets its own job.
+  bun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun script/smoke.bun.ts

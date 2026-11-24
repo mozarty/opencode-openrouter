@@ -47,14 +47,49 @@ describe("resolveCredential", () => {
 
   it("reads a key from the credential store", async () => {
     await withDataHome(async (dataHome) => {
-      seedCredential(dataHome, JSON.stringify({ key: "sk-or-store" }))
+      seedCredential(dataHome, JSON.stringify({ type: "key", key: "sk-or-store" }))
       assert.equal(await resolveCredential({ env: {}, dataHome }), "sk-or-store")
+    })
+  })
+
+  it("reads a key from a credential row without a type", async () => {
+    await withDataHome(async (dataHome) => {
+      seedCredential(dataHome, JSON.stringify({ key: "sk-or-typeless" }))
+      assert.equal(await resolveCredential({ env: {}, dataHome }), "sk-or-typeless")
     })
   })
 
   it("never returns a structured OAuth blob as a bearer token", async () => {
     await withDataHome(async (dataHome) => {
       seedCredential(dataHome, JSON.stringify({ type: "oauth", access: "at-123", refresh: "rt-456" }))
+      assert.equal(await resolveCredential({ env: {}, dataHome }), null)
+    })
+  })
+
+  it("never returns an OAuth token field as a bearer token", async () => {
+    await withDataHome(async (dataHome) => {
+      seedCredential(dataHome, JSON.stringify({ type: "oauth", token: "session-token" }))
+      assert.equal(await resolveCredential({ env: {}, dataHome }), null)
+    })
+  })
+
+  it("does not treat the JSON literal null as a key", async () => {
+    await withDataHome(async (dataHome) => {
+      seedCredential(dataHome, "null")
+      assert.equal(await resolveCredential({ env: {}, dataHome }), null)
+    })
+  })
+
+  it("accepts an unstructured value that is not JSON", async () => {
+    await withDataHome(async (dataHome) => {
+      seedCredential(dataHome, "  sk-or-raw  ")
+      assert.equal(await resolveCredential({ env: {}, dataHome }), "sk-or-raw")
+    })
+  })
+
+  it("rejects a structured credential without a key field", async () => {
+    await withDataHome(async (dataHome) => {
+      seedCredential(dataHome, JSON.stringify({ type: "api", key: "   " }))
       assert.equal(await resolveCredential({ env: {}, dataHome }), null)
     })
   })

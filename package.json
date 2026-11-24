@@ -1,7 +1,7 @@
 {
   "name": "opencode-openrouter",
   "version": "0.1.0",
-  "description": "OpenCode TUI plugin: OpenRouter spend, monthly budget and forecast in the sidebar",
+  "description": "OpenCode TUI plugin: OpenRouter spend, budget and daily average in the sidebar",
   "type": "module",
   "exports": {
     "./tui": "./src/tui.tsx"
@@ -36,17 +36,39 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
-    "prepublishOnly": "npm run typecheck && npm test"
-  },
-  "dependencies": {
-    "@opencode/plugin": "2.4.1"
-  },
-  "devDependencies": {
-    "@opencode/theme": "2.4.1"
+    "check": "biome check",
+    "check:fix": "biome check --write",
+    "format": "biome format --write",
+    "smoke:bun": "bun script/smoke.bun.ts",
+    "prepublishOnly": "npm run typecheck && npm run check && npm test"
   },
   "peerDependencies": {
+    "@opencode/plugin": "2.4.1",
     "@opentui/core": ">=0.9.4",
     "@opentui/solid": ">=0.9.4",
     "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    },
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.9",
+    "@opencode/plugin": "2.4.1",
+    "@opencode/theme": "2.4.1",
+    "@opentui/core": "0.9.4",
+    "@opentui/solid": "0.9.4",
+    "@types/node": "24.12.2",
+    "solid-js": "1.9.17"
   }
 }

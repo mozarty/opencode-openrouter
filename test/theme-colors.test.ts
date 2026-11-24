@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { buildPalette, contrastRatio, pickVivid, severityColor, toHex, withAlpha, type PaletteTokens } from "../src/theme-colors.ts"
+import { buildPalette, contrastRatio, pickVivid, toHex, withAlpha, type PaletteTokens } from "../src/theme-colors.ts"
 
 function rgba(r: number, g: number, b: number, a = 255) {
   return { toInts: (): [number, number, number, number] => [r, g, b, a] }
@@ -111,18 +111,5 @@ describe("pickVivid", () => {
 
   it("reports nothing when no candidate qualifies", () => {
     assert.equal(pickVivid([rgba(0x0b, 0x0e, 0x14), undefined], background), null)
-  })
-})
-
-describe("severityColor", () => {
-  const palette = buildPalette(tokens)
-
-  it("keeps the metric colour while on budget", () => {
-    assert.equal(severityColor(palette, "normal", "#123456"), "#123456")
-  })
-
-  it("overrides with the warning and danger hues", () => {
-    assert.equal(severityColor(palette, "warning", "#123456"), "#e6b673")
-    assert.equal(severityColor(palette, "danger", "#123456"), "#d95757")
   })
 })

@@ -33,22 +33,33 @@ function defaultDataHome(): string {
   return process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share")
 }
 
-function safeJson(value: unknown): unknown {
-  if (typeof value !== "string") return null
+// "Did not parse" has to stay distinct from "parsed to null": a credential row
+// holding the literal `null` must not be mistaken for an unstructured secret.
+function parseJson(value: string): { ok: true; value: unknown } | { ok: false } {
   try {
-    return JSON.parse(value)
+    return { ok: true, value: JSON.parse(value) }
   } catch {
-    return null
+    return { ok: false }
   }
 }
 
+// A structured non-key credential (OAuth, session) is a different token type and
+// must never be sent as a bearer token. Unknown types are still read by field,
+// so a future key-shaped method keeps working without a plugin release.
+const NON_KEY_TYPES = new Set(["oauth", "session"])
+const KEY_FIELDS = ["key", "apiKey"] as const
+
 function readSecret(value: unknown): string | null {
-  if (typeof value === "string" && value) return value
+  if (typeof value === "string") return value.trim() || null
   if (!value || typeof value !== "object") return null
+
   const record = value as Record<string, unknown>
-  for (const field of ["key", "apiKey", "token"]) {
+  const type = typeof record.type === "string" ? record.type.toLowerCase() : null
+  if (type && NON_KEY_TYPES.has(type)) return null
+
+  for (const field of KEY_FIELDS) {
     const candidate = record[field]
-    if (typeof candidate === "string" && candidate) return candidate
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
   }
   return null
 }
@@ -75,10 +86,10 @@ function keyFromCredentialStore(dataHome: string): string | null {
     const row = database.prepare(CREDENTIAL_QUERY).get(INTEGRATION_ID) as { value?: unknown } | undefined
     if (!row) return null
 
-    // `value` is normally a JSON blob. A bare string is only accepted when the
-    // row is not structured, so an OAuth blob is never sent as a bearer token.
-    const parsed = safeJson(row.value)
-    return readSecret(parsed) ?? (parsed === null ? readSecret(row.value) : null)
+    // `value` is normally a JSON blob. The raw text is only read when the row is
+    // not valid JSON, so a structured row is always judged on its fields.
+    const decoded = parseJson(String(row.value))
+    return decoded.ok ? readSecret(decoded.value) : readSecret(row.value)
   } catch {
     return null
   } finally {
