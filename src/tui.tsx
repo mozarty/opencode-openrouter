@@ -6,7 +6,7 @@ import { createSignal, For } from "solid-js"
 import type { Context } from "@opencode/plugin/tui/context"
 
 import { ENV_API_KEY, INTEGRATION_ID, resolveCredential } from "./credentials.ts"
-import { EVENT_THROTTLE_MS, parseOptions, type PluginOptions } from "./options.ts"
+import { EVENT_THROTTLE_MS, MAX_BACKOFF_MS, parseOptions, type PluginOptions } from "./options.ts"
 import { buildPalette, HUE_STEPS, pickVivid, toHex, type Palette, type PaletteTokens } from "./theme-colors.ts"
 import { fetchSnapshot, type Snapshot, type SnapshotFailure } from "./usage.ts"
 import { LABEL_WIDTH, usageView, type Tone } from "./view.ts"
@@ -62,6 +62,13 @@ function missingKeyReason(context: Context): Reason {
   if (!integration) return "not-configured"
   if (integration.connections.some((connection) => connection.status?.status === "needs_auth")) return "needs-auth"
   return "no-key"
+}
+
+// A subagent run is part of the parent request, so refreshing for each of them
+// would turn one user request into N fetches. A session that is not loaded yet
+// counts as a root session, so a real completion is never dropped.
+function isRootSession(context: Context, sessionID: string): boolean {
+  return context.data.session.get(sessionID)?.parentID == null
 }
 
 function toneColor(colors: Palette, tone: Tone): string {
@@ -150,8 +157,14 @@ export default Plugin.define({
 
     let disposed = false
     let lastFetchAt = 0
+    let failures = 0
     let inFlight: AbortController | null = null
     let credential: string | null = null
+
+    // Doubles the gap after consecutive failures, up to MAX_BACKOFF_MS, and
+    // returns to the normal cadence on the first success.
+    const throttleMs = () =>
+      failures === 0 ? EVENT_THROTTLE_MS : Math.min(MAX_BACKOFF_MS, EVENT_THROTTLE_MS * 2 ** failures)
 
     // The palette is a pure function of the theme and the accent override, so
     // caching by identity keeps the hue search out of every render.
@@ -163,9 +176,9 @@ export default Plugin.define({
       return paletteCache.palette
     }
 
-    // Resolves true when a fresh snapshot landed. New sessions and completed
-    // turns land here too, throttled so a burst of subagent sessions cannot
-    // abort the fetch in flight or hammer the API.
+    // Resolves true when a fresh snapshot landed. Per-turn events and new
+    // sessions land here throttled; a finished root run forces a fetch, because
+    // that is exactly "the user's request is done".
     async function refresh(force = false): Promise<boolean> {
       if (disposed) return false
 
@@ -176,7 +189,7 @@ export default Plugin.define({
         return false
       }
 
-      if (!force && Date.now() - lastFetchAt < EVENT_THROTTLE_MS) return false
+      if (!force && Date.now() - lastFetchAt < throttleMs()) return false
 
       lastFetchAt = Date.now()
       inFlight?.abort()
@@ -187,10 +200,12 @@ export default Plugin.define({
       if (disposed || controller.signal.aborted) return false
 
       if (!result.ok) {
+        failures = Math.min(failures + 1, 8)
         setReason(result.reason)
         return false
       }
 
+      failures = 0
       setSnapshot(result.snapshot)
       setReason(null)
       return true
@@ -231,9 +246,16 @@ export default Plugin.define({
     const timer = setInterval(() => void refresh(), options.refreshIntervalMs)
 
     const stops = [
+      // Throttled: spend moved mid-run, or another session started. A burst of
+      // subagent sessions must not abort the fetch in flight.
       context.data.on("session.usage.updated", () => void refresh()),
-      context.data.on("session.execution.succeeded", () => void refresh()),
       context.data.on("session.created", () => void refresh()),
+      // Unthrottled: the user's request is done, so the number they just
+      // produced should show up. Subagent runs are part of a parent request.
+      context.data.on("session.execution.succeeded", (event) => {
+        if (!isRootSession(context, event.data.sessionID)) return
+        void refresh(true)
+      }),
       // Unthrottled: the key or the connected integrations changed.
       context.data.on("credential.switched", () => void loadCredential()),
       context.data.on("credential.updated", () => void loadCredential()),

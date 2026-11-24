@@ -10,10 +10,14 @@ export type PluginOptions = {
 export const MIN_REFRESH_INTERVAL_MS = 10_000
 export const MAX_REFRESH_INTERVAL_MS = 60 * 60_000
 export const DEFAULT_REFRESH_INTERVAL_MS = 30_000
-// Event-driven refreshes (a finished turn, a new session) are throttled
-// separately from the poll so heavy agent traffic cannot hammer the API. This is
-// also what protects OpenRouter's per-IP burst limit on the key endpoint.
-export const EVENT_THROTTLE_MS = 15_000
+// Per-turn refreshes are throttled separately from the poll so heavy agent
+// traffic cannot hammer the API. A finished user request bypasses this entirely.
+// Spend only moves when an upstream request settles, so a window shorter than
+// this buys nothing but duplicate calls.
+export const EVENT_THROTTLE_MS = 5_000
+// Consecutive failures double the gap up to this cap, so a rate-limited or
+// offline API is probed less and less instead of once per throttle window.
+export const MAX_BACKOFF_MS = 2 * 60_000
 
 function asPositiveNumber(value: unknown): number | null {
   const num = typeof value === "string" ? Number(value) : value

@@ -73,7 +73,7 @@ Options are passed through the plugin entry:
 | Option              | Type                     | Default     | Description                                                                                  |
 | ------------------- | ------------------------ | ----------- | -------------------------------------------------------------------------------------------- |
 | `monthlyLimit`      | `number`                 | –           | Monthly USD cap used only when the API reports no budget for the key.                        |
-| `refreshIntervalMs` | `number`                 | `30000`     | Poll interval, clamped to 10s–1h. Spend is also refreshed after every model turn and new session, throttled to once per 15s. |
+| `refreshIntervalMs` | `number`                 | `30000`     | Poll interval, clamped to 10s–1h. Spend also refreshes the moment your request finishes, and every 5s while it runs (backing off after failures). |
 | `title`             | `string`                 | `OpenRouter`| Box title.                                                                                    |
 | `accent`            | `string`                 | theme       | Hex colour for the frame, title and dividers (`#rgb`, `#rrggbb` or `#rrggbbaa`).              |
 

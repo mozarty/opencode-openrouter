@@ -28,8 +28,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `@opencode/plugin` is a peer dependency (plus a dev dependency) instead of a
   runtime dependency, so installing the plugin no longer pulls a second copy of
   the host SDK and `effect`.
-- Event-driven refreshes are throttled to 15s (`EVENT_THROTTLE_MS`) so agent
-  traffic cannot hammer the key endpoint; the poll interval is unchanged.
+- A finished user request refreshes immediately; mid-run turns and new sessions
+  are throttled to 5s (`EVENT_THROTTLE_MS`), and consecutive failures back off to
+  `MAX_BACKOFF_MS` so agent traffic cannot hammer the key endpoint. Subagent runs
+  do not trigger their own refresh. The poll interval is unchanged.
 - Plugin id is `openrouter.sidebar`, out of the `opencode.*` namespace the host
   keeps for built-ins.
 - Local imports use explicit `.ts` extensions so the modules can be imported by
