@@ -1,7 +1,12 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { parseOptions, DEFAULT_REFRESH_INTERVAL_MS, MIN_REFRESH_INTERVAL_MS } from "../src/options.ts"
+import {
+  DEFAULT_REFRESH_INTERVAL_MS,
+  MAX_REFRESH_INTERVAL_MS,
+  MIN_REFRESH_INTERVAL_MS,
+  parseOptions,
+} from "../src/options.ts"
 
 describe("parseOptions", () => {
   it("applies defaults when nothing is configured", () => {
@@ -11,6 +16,7 @@ describe("parseOptions", () => {
     assert.deepEqual(options.workspaces, {})
     assert.equal(options.refreshIntervalMs, DEFAULT_REFRESH_INTERVAL_MS)
     assert.equal(options.title, "OpenRouter")
+    assert.equal(options.accent, null)
   })
 
   it("prefers the configured management key over the environment", () => {
@@ -26,6 +32,10 @@ describe("parseOptions", () => {
     assert.equal(parseOptions({ managementKey: "   " }, {}).managementKey, null)
   })
 
+  it("trims a custom title", () => {
+    assert.equal(parseOptions({ title: "  Spend  " }, {}).title, "Spend")
+  })
+
   it("accepts numeric strings for monthlyLimit", () => {
     assert.equal(parseOptions({ monthlyLimit: "25" }, {}).monthlyLimit, 25)
   })
@@ -38,7 +48,7 @@ describe("parseOptions", () => {
 
   it("clamps the refresh interval", () => {
     assert.equal(parseOptions({ refreshIntervalMs: 1 }, {}).refreshIntervalMs, MIN_REFRESH_INTERVAL_MS)
-    assert.equal(parseOptions({ refreshIntervalMs: 99_999_999 }, {}).refreshIntervalMs, 3_600_000)
+    assert.equal(parseOptions({ refreshIntervalMs: 99_999_999 }, {}).refreshIntervalMs, MAX_REFRESH_INTERVAL_MS)
     assert.equal(parseOptions({ refreshIntervalMs: 45_000 }, {}).refreshIntervalMs, 45_000)
   })
 
@@ -51,14 +61,18 @@ describe("parseOptions", () => {
     assert.deepEqual(parseOptions({ workspaces: ["nope"] }, {}).workspaces, {})
   })
 
-  it("accepts hex accent overrides", () => {
+  it("expands shorthand accent colours to six digits", () => {
+    assert.equal(parseOptions({ accent: "#abc" }, {}).accent, "#aabbcc")
+    assert.equal(parseOptions({ accent: " #abcd " }, {}).accent, "#aabbccdd")
+  })
+
+  it("accepts six and eight digit accent colours", () => {
     assert.equal(parseOptions({ accent: "#ff8c3c" }, {}).accent, "#ff8c3c")
-    assert.equal(parseOptions({ accent: " #abc " }, {}).accent, "#abc")
+    assert.equal(parseOptions({ accent: "#ff8c3c80" }, {}).accent, "#ff8c3c80")
   })
 
   it("rejects non-hex accent values", () => {
     assert.equal(parseOptions({ accent: "orange" }, {}).accent, null)
     assert.equal(parseOptions({ accent: "ff8c3c" }, {}).accent, null)
-    assert.equal(parseOptions(undefined, {}).accent, null)
   })
 })

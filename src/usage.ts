@@ -27,10 +27,6 @@ export type SnapshotResult =
   | { ok: true; snapshot: Snapshot }
   | { ok: false; reason: SnapshotFailure }
 
-export type SnapshotConfig = {
-  readonly monthlyLimit: number | null
-}
-
 const API_BASE = "https://openrouter.ai/api/v1"
 const REQUEST_TIMEOUT_MS = 10_000
 const WORKSPACE_CACHE_TTL_MS = 10 * 60_000
@@ -66,29 +62,23 @@ function num(value: unknown): number | null {
 // Aborts on timeout or caller cancellation so a hung request cannot wedge the
 // poll loop.
 async function request(url: string, key: string, signal?: AbortSignal): Promise<FetchResult | null> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  const cancel = () => controller.abort()
-  signal?.addEventListener("abort", cancel, { once: true })
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-      signal: controller.signal,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     })
     const body: unknown = await res.json().catch(() => null)
     return { status: res.status, body }
   } catch {
     return null
-  } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener("abort", cancel)
   }
 }
 
 async function workspaceNames(managementKey: string, signal?: AbortSignal): Promise<Map<string, string>> {
-  const cacheKey = managementKey.slice(-8)
-  if (workspaceCache && workspaceCache.key === cacheKey && Date.now() - workspaceCache.at < WORKSPACE_CACHE_TTL_MS) {
-    return workspaceCache.map
+  const cached = workspaceCache
+  if (cached && cached.key === managementKey && Date.now() - cached.at < WORKSPACE_CACHE_TTL_MS) {
+    return cached.map
   }
 
   const res = await request(`${API_BASE}/workspaces`, managementKey, signal)
@@ -105,9 +95,15 @@ async function workspaceNames(managementKey: string, signal?: AbortSignal): Prom
 
   // Only cache a successful listing; a bad management key should be retried.
   if (res?.status === 200 && map.size > 0) {
-    workspaceCache = { key: cacheKey, at: Date.now(), map }
+    workspaceCache = { key: managementKey, at: Date.now(), map }
   }
   return map
+}
+
+// Lets an explicit refresh pick up renamed or deleted workspaces instead of
+// serving the cached listing until it expires.
+export function resetWorkspaceCache(): void {
+  workspaceCache = null
 }
 
 // A monthly budget is the current window when it resets at the next UTC month
@@ -130,12 +126,12 @@ function isUtcMonthlyBudget(value: unknown, ...scopes: string[]): value is Budge
 // Prefers the member-scoped budget over the workspace default, since that is
 // the cap the current key actually spends against.
 function pickMemberMonthlyBudget(keyData: Record<string, unknown>, budgets: unknown[]): BudgetEntry | null {
-  if (isUtcMonthlyBudget(keyData.effective_budget, "member", "workspace_default_member")) {
-    return record(keyData.effective_budget) as BudgetEntry
-  }
+  const direct = keyData.effective_budget
+  if (isUtcMonthlyBudget(direct, "member", "workspace_default_member")) return direct
+
   return (
-    (budgets.find((b) => isUtcMonthlyBudget(b, "member")) as BudgetEntry | undefined) ??
-    (budgets.find((b) => isUtcMonthlyBudget(b, "workspace_default_member")) as BudgetEntry | undefined) ??
+    budgets.find((budget) => isUtcMonthlyBudget(budget, "member")) ??
+    budgets.find((budget) => isUtcMonthlyBudget(budget, "workspace_default_member")) ??
     null
   )
 }
@@ -178,26 +174,31 @@ export async function fetchSnapshot(
 
 // Resolves the monthly cap and remaining balance from the API snapshot. Keys
 // without an API-level cap fall back to the configured `monthlyLimit`.
-export function resolveMonthlyLimit(data: Snapshot, config: SnapshotConfig): MonthlyLimit {
+export function resolveMonthlyLimit(data: Snapshot, monthlyLimit: number | null): MonthlyLimit {
   if (data.limitRemaining != null) {
-    let total: number | null = null
-    if (data.limitTotal != null && data.limitTotal > 0) {
-      total = data.limitTotal
-    } else if (data.monthly != null) {
-      total = data.monthly + data.limitRemaining
-    }
-    const pct = total != null && total > 0 && data.monthly != null ? data.monthly / total : null
-    return { total, remaining: data.limitRemaining, pct }
+    const total =
+      data.limitTotal != null && data.limitTotal > 0
+        ? data.limitTotal
+        : data.monthly != null
+          ? data.monthly + data.limitRemaining
+          : null
+    return { total, remaining: data.limitRemaining, pct: spendRatio(data.monthly, total) }
   }
 
-  if (config.monthlyLimit != null && config.monthlyLimit > 0) {
-    const total = config.monthlyLimit
-    const remaining = data.monthly != null ? total - data.monthly : total
-    const pct = data.monthly != null ? data.monthly / total : null
-    return { total, remaining, pct }
+  if (monthlyLimit != null && monthlyLimit > 0) {
+    return {
+      total: monthlyLimit,
+      remaining: data.monthly != null ? monthlyLimit - data.monthly : monthlyLimit,
+      pct: spendRatio(data.monthly, monthlyLimit),
+    }
   }
 
   return { total: null, remaining: null, pct: null }
+}
+
+// Guards the divide: only a known positive total yields a percentage.
+export function spendRatio(spend: number | null, total: number | null): number | null {
+  return spend != null && total != null && total > 0 ? spend / total : null
 }
 
 // Uses elapsed UTC calendar days, today included, to estimate this month's

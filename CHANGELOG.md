@@ -31,6 +31,11 @@ First public release, extracted from a personal OpenCode config.
 - Every metric takes a different hue from the active theme — accent frame,
   info "Today", categorical "Avg/day", success "Forecast" — instead of one flat
   text colour, with warning/danger overriding on budget pressure.
+- Labels use the theme's body text colour so the left column stays readable
+  instead of fading out at `text.muted`.
+- The accent and categorical hues are picked by colourfulness against the
+  background instead of a fixed ramp step, so the palette survives OpenCode
+  changing its theme layout generation.
 - Configuration moved from `~/.config/opencode/openrouter-local.json` to
   documented plugin options in `cli.json`, with secrets read from the
   environment.
@@ -39,6 +44,9 @@ First public release, extracted from a personal OpenCode config.
 
 ### Fixed
 
+- An OAuth-shaped credential blob is no longer sent to OpenRouter as a bearer
+  token; only key-shaped secrets are read from the credential store.
+- Sub-cent negative balances render as `-$0.0040` instead of `$-0.0040`.
 - The widget distinguishes "not configured", "needs auth", "key not found",
   "key rejected" and "unreachable" instead of showing a single `unavailable`.
 - A failed refresh keeps the last good snapshot visible and marks it stale

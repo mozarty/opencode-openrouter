@@ -6,14 +6,15 @@ import { createSignal } from "solid-js"
 import type { Context } from "@opencode/plugin/tui/context"
 
 import { ENV_API_KEY, INTEGRATION_ID, resolveCredential } from "./credentials"
-import { bar, money, percent, severity, shortenId } from "./format"
+import { bar, money, percent, severity, workspaceLabel } from "./format"
 import { parseOptions, type PluginOptions } from "./options"
-import { buildPalette, severityColor, type Palette, type PaletteTokens } from "./theme-colors"
+import { buildPalette, HUE_STEPS, pickVivid, severityColor, toHex, type Palette, type PaletteTokens } from "./theme-colors"
 import {
   fetchSnapshot,
+  resetWorkspaceCache,
   resolveMonthlyLimit,
   resolveMonthlyPace,
-  type MonthlyPace,
+  spendRatio,
   type Snapshot,
   type SnapshotFailure,
 } from "./usage"
@@ -25,19 +26,27 @@ const DIVIDER_OVERSHOOT = 2
 const MIN_FETCH_INTERVAL_MS = 5_000
 
 type Reason = SnapshotFailure | "no-key" | "not-configured" | "needs-auth"
-type Status = "loading" | "ready" | "error"
 
-// Pulls distinct hues out of the theme so every metric is its own color. Hue
-// ramps run bright (100) to dark (900), so dark mode takes a low step and light
-// mode a high one.
-function themeTokens(theme: Context["theme"], mode: Context["themeMode"]): PaletteTokens {
-  const step = mode === "light" ? 600 : 200
+// Picks distinct hues out of the theme so every metric is its own color. The
+// step holding each hue's base colour is chosen by colourfulness and contrast,
+// so a legacy or current theme layout both land on the vivid shade. A
+// categorical hue that would collide with the accent is skipped.
+function themeTokens(theme: Context["theme"]): PaletteTokens {
+  const background = theme.background.base
+  const vivid = (scale: Context["theme"]["hue"]["accent"]) => pickVivid(HUE_STEPS.map((step) => scale[step]), background)
+
+  const accent = vivid(theme.hue.accent) ?? theme.text.base
+  const accentHex = toHex(accent)
+  const secondary = theme.categorical
+    .map((scale) => vivid(scale))
+    .find((color) => color != null && toHex(color) !== accentHex)
+
   return {
-    accent: theme.hue.accent[step],
-    muted: theme.text.muted,
+    accent,
+    label: theme.text.base,
     base: theme.text.base,
     info: theme.text.feedback.info.base,
-    secondary: theme.categorical[0]?.[step] ?? theme.text.feedback.info.base,
+    secondary: secondary ?? theme.text.feedback.info.base,
     warning: theme.text.feedback.warning.base,
     danger: theme.text.feedback.error.base,
     success: theme.text.feedback.success.base,
@@ -52,27 +61,14 @@ const REASON: Record<Reason, { label: string; hint?: string }> = {
   unavailable: { label: "unreachable", hint: "retrying" },
 }
 
-function workspaceLabel(data: Snapshot, options: PluginOptions): string {
-  if (data.workspaceName) return data.workspaceName
-  const configured = data.workspace ? options.workspaces[data.workspace] : undefined
-  return configured ?? shortenId(data.workspace)
-}
+function missingKeyReason(context: Context): Reason {
+  const integrations = context.data.location.integration.list(context.location)
+  if (!integrations) return "no-key"
 
-// Sizes the rule slightly past the widest rendered metric row.
-function dividerWidth(
-  data: Snapshot,
-  pace: MonthlyPace,
-  monthSuffix: string | undefined,
-  barText: string | undefined,
-): number {
-  const widestRow = Math.max(
-    LABEL_WIDTH + money(data.daily).length,
-    LABEL_WIDTH + money(pace.averagePerDay).length,
-    LABEL_WIDTH + money(pace.projected).length,
-    LABEL_WIDTH + money(data.monthly).length + (monthSuffix?.length ?? 0),
-    barText ? LABEL_WIDTH + barText.length : 0,
-  )
-  return Math.max(DIVIDER_MIN_WIDTH, widestRow + DIVIDER_OVERSHOOT)
+  const integration = integrations.find((entry) => entry.id === INTEGRATION_ID)
+  if (!integration) return "not-configured"
+  if (integration.connections.some((connection) => connection.status?.status === "needs_auth")) return "needs-auth"
+  return "no-key"
 }
 
 const Row = (props: {
@@ -95,42 +91,87 @@ const Divider = (props: { colors: Palette; width: number }) => (
   </text>
 )
 
-const Notice = (props: { colors: Palette; reason: Reason; stale: boolean }) => (
-  <>
-    <text>
-      <span style={{ fg: props.colors.danger }}>✗ </span>
-      <span style={{ fg: props.colors.label }}>{REASON[props.reason].label}</span>
-      {props.stale && <span style={{ fg: props.colors.warning }}> · stale</span>}
-    </text>
-    {REASON[props.reason].hint && (
+const Notice = (props: { colors: Palette; reason: Reason; stale: boolean }) => {
+  const { label, hint } = REASON[props.reason]
+
+  return (
+    <>
       <text>
-        <span style={{ fg: props.colors.label }}>{`  ${REASON[props.reason].hint}`}</span>
+        <span style={{ fg: props.colors.danger }}>✗ </span>
+        <span style={{ fg: props.colors.label }}>{label}</span>
+        {props.stale && <span style={{ fg: props.colors.warning }}> · stale</span>}
       </text>
-    )}
-  </>
-)
-
-function connectionState(context: Context): "connected" | "missing" | "needs-auth" | "unknown" {
-  const integrations = context.data.location.integration.list(context.location)
-  if (!integrations) return "unknown"
-
-  const integration = integrations.find((entry) => entry.id === INTEGRATION_ID)
-  if (!integration) return "missing"
-  if (integration.connections.some((connection) => connection.status?.status === "needs_auth")) return "needs-auth"
-  return integration.connections.length > 0 ? "connected" : "missing"
+      {hint && (
+        <text>
+          <span style={{ fg: props.colors.label }}>{`  ${hint}`}</span>
+        </text>
+      )}
+    </>
+  )
 }
+
+const Usage = (props: { colors: Palette; data: Snapshot; options: PluginOptions }) => {
+  const { colors, data, options } = props
+  const limit = resolveMonthlyLimit(data, options.monthlyLimit)
+  const pace = resolveMonthlyPace(data.monthly)
+
+  const daily = money(data.daily)
+  const average = money(pace.averagePerDay)
+  const forecast = money(pace.projected)
+  const month = money(data.monthly)
+  const monthSuffix = limit.total != null ? ` / ${money(limit.total)}` : ""
+  const barText = limit.pct != null ? `${bar(limit.pct, BAR_WIDTH)} ${percent(limit.pct)}` : ""
+
+  // The rule spans the widest rendered row, so derive it from the formatted
+  // strings that are actually drawn instead of re-formatting the numbers.
+  const widest = Math.max(
+    ...[daily, average, forecast, `${month}${monthSuffix}`, barText].map((value) => LABEL_WIDTH + value.length),
+  )
+  const width = Math.max(DIVIDER_MIN_WIDTH, widest + DIVIDER_OVERSHOOT)
+
+  const monthColor = severityColor(colors, severity(limit.pct), colors.value)
+  const forecastColor = severityColor(colors, severity(spendRatio(pace.projected, limit.total)), colors.forecast)
+  const remainingColor = limit.remaining != null && limit.remaining < 0 ? colors.danger : colors.success
+
+  return (
+    <>
+      <text>
+        <span style={{ fg: colors.accent }}>◆ </span>
+        <span style={{ fg: colors.label }}>{workspaceLabel(data.workspace, data.workspaceName, options.workspaces)}</span>
+        {limit.remaining != null && <span style={{ fg: remainingColor }}>{`  ${money(limit.remaining)}`}</span>}
+      </text>
+      <box>
+        <text>{" "}</text>
+        <Row colors={colors} label="Today" value={daily} color={colors.today} />
+        <Divider colors={colors} width={width} />
+        <Row colors={colors} label="Avg/day" value={average} color={colors.average} />
+        <Divider colors={colors} width={width} />
+        <Row colors={colors} label="Forecast" value={forecast} color={forecastColor} />
+        <Divider colors={colors} width={width} />
+        <Row colors={colors} label="Month" value={month} color={monthColor} suffix={monthSuffix} />
+        {barText && <Row colors={colors} label="" value={barText} color={monthColor} />}
+      </box>
+    </>
+  )
+}
+
+const Loading = (props: { colors: Palette }) => (
+  <text>
+    <span style={{ fg: props.colors.label }}>loading…</span>
+  </text>
+)
 
 export default Plugin.define({
   id: "opencode.openrouter",
   setup(context) {
     const options = parseOptions(context.options)
     const [snapshot, setSnapshot] = createSignal<Snapshot | null>(null)
-    const [status, setStatus] = createSignal<Status>("loading")
     const [reason, setReason] = createSignal<Reason | null>(null)
 
     let disposed = false
     let lastFetchAt = 0
     let inFlight: AbortController | null = null
+    let credential: string | null = null
 
     async function refresh(force = false) {
       if (disposed) return
@@ -141,50 +182,51 @@ export default Plugin.define({
       const controller = new AbortController()
       inFlight = controller
 
-      // Re-resolve on every refresh so credential switches take effect immediately.
-      const credential = await resolveCredential()
-      if (disposed || controller.signal.aborted) return
-
       if (!credential) {
-        const connection = connectionState(context)
-        setReason(connection === "missing" ? "not-configured" : connection === "needs-auth" ? "needs-auth" : "no-key")
-        setStatus("error")
+        setReason(missingKeyReason(context))
         return
       }
 
-      const result = await fetchSnapshot(credential.key, options.managementKey, controller.signal)
+      const result = await fetchSnapshot(credential, options.managementKey, controller.signal)
       if (disposed || controller.signal.aborted) return
 
       if (result.ok) {
         setSnapshot(result.snapshot)
         setReason(null)
-        setStatus("ready")
         return
       }
 
       setReason(result.reason)
-      setStatus("error")
+    }
+
+    // Read the key once and re-read it only when it changes: the credential
+    // store is a synchronous SQLite lookup that must not run on every poll.
+    async function loadCredential() {
+      credential = await resolveCredential()
+      await refresh(true)
     }
 
     // Integration metadata drives the "not configured" vs "key not readable"
     // distinction. The secret itself is never exposed by the plugin API.
-    void context.data.location.integration
-      .sync(context.location)
-      .catch(() => {})
-      .then(() => refresh())
+    void (async () => {
+      await context.data.location.integration.sync(context.location).catch(() => {})
+      await loadCredential()
+    })()
 
     const timer = setInterval(() => void refresh(), options.refreshIntervalMs)
 
     const stops = [
-      // Throttled: spend changes after a model turn.
+      // Throttled: spend changes after a model turn. New sessions land here too,
+      // because a burst of subagent sessions must not abort the fetch in flight.
       context.data.on("session.usage.updated", () => void refresh()),
       context.data.on("session.execution.succeeded", () => void refresh()),
+      context.data.on("session.created", () => void refresh()),
       // Unthrottled: the key or the connected integrations changed.
-      context.data.on("session.created", () => void refresh(true)),
-      context.data.on("credential.switched", () => void refresh(true)),
-      context.data.on("credential.updated", () => void refresh(true)),
+      context.data.on("credential.switched", () => void loadCredential()),
+      context.data.on("credential.updated", () => void loadCredential()),
       context.data.on("integration.updated", () => {
         context.data.location.integration.invalidate(context.location)
+        resetWorkspaceCache()
         void refresh(true)
       }),
     ]
@@ -204,10 +246,8 @@ export default Plugin.define({
     const disposeSlot = context.ui.slot({
       append: "sidebar.content",
       render: () => {
-        const colors = buildPalette(themeTokens(context.theme, context.themeMode), { accentOverride: options.accent })
-        const current = status()
+        const colors = buildPalette(themeTokens(context.theme), { accentOverride: options.accent })
         const data = snapshot()
-        const stale = current === "error" && data != null
         const activeReason = reason()
 
         return (
@@ -219,57 +259,9 @@ export default Plugin.define({
             titleColor={colors.accent}
             padding={1}
           >
-            {stale && activeReason && <Notice colors={colors} reason={activeReason} stale={true} />}
-            {!data && current === "error" && activeReason && (
-              <Notice colors={colors} reason={activeReason} stale={false} />
-            )}
-            {!data && current === "loading" && (
-              <text>
-                <span style={{ fg: colors.label }}>loading…</span>
-              </text>
-            )}
-            {data &&
-              (() => {
-                const limit = resolveMonthlyLimit(data, options)
-                const pace = resolveMonthlyPace(data.monthly)
-                const monthColor = severityColor(colors, severity(limit.pct), colors.value)
-                const forecastPct =
-                  limit.total != null && limit.total > 0 && pace.projected != null ? pace.projected / limit.total : null
-                const forecastColor = severityColor(colors, severity(forecastPct), colors.forecast)
-                const remainingColor = limit.remaining != null && limit.remaining < 0 ? colors.danger : colors.success
-                const monthSuffix = limit.total != null ? ` / ${money(limit.total)}` : undefined
-                const barText = limit.pct != null ? `${bar(limit.pct, BAR_WIDTH)} ${percent(limit.pct)}` : undefined
-                const width = dividerWidth(data, pace, monthSuffix, barText)
-
-                return (
-                  <>
-                    <text>
-                      <span style={{ fg: colors.accent }}>◆ </span>
-                      <span style={{ fg: colors.label }}>{workspaceLabel(data, options)}</span>
-                      {limit.remaining != null && (
-                        <span style={{ fg: remainingColor }}>{`  ${money(limit.remaining)}`}</span>
-                      )}
-                    </text>
-                    <box>
-                      <text>{" "}</text>
-                      <Row colors={colors} label="Today" value={money(data.daily)} color={colors.today} />
-                      <Divider colors={colors} width={width} />
-                      <Row colors={colors} label="Avg/day" value={money(pace.averagePerDay)} color={colors.average} />
-                      <Divider colors={colors} width={width} />
-                      <Row colors={colors} label="Forecast" value={money(pace.projected)} color={forecastColor} />
-                      <Divider colors={colors} width={width} />
-                      <Row
-                        colors={colors}
-                        label="Month"
-                        value={money(data.monthly)}
-                        color={monthColor}
-                        suffix={monthSuffix}
-                      />
-                      {barText && <Row colors={colors} label="" value={barText} color={monthColor} />}
-                    </box>
-                  </>
-                )
-              })()}
+            {activeReason && <Notice colors={colors} reason={activeReason} stale={data != null} />}
+            {!data && !activeReason && <Loading colors={colors} />}
+            {data && <Usage colors={colors} data={data} options={options} />}
           </box>
         )
       },

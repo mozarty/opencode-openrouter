@@ -12,16 +12,14 @@ import { join } from "node:path"
 export const ENV_API_KEY = "OPENROUTER_API_KEY"
 export const INTEGRATION_ID = "openrouter"
 
-export type CredentialSource = "env" | "credential_store" | "auth_file"
-
-export type Credential = {
-  readonly key: string
-  readonly source: CredentialSource
-}
-
 type ResolveOptions = {
   readonly env?: Readonly<Record<string, string | undefined>>
   readonly dataHome?: string
+}
+
+type Database = {
+  prepare: (sql: string) => { get: (id: string) => unknown }
+  close: () => void
 }
 
 // Switching keys deactivates the old row and inserts the new one in the same
@@ -35,6 +33,15 @@ function defaultDataHome(): string {
   return process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share")
 }
 
+function safeJson(value: unknown): unknown {
+  if (typeof value !== "string") return null
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
 function readSecret(value: unknown): string | null {
   if (typeof value === "string" && value) return value
   if (!value || typeof value !== "object") return null
@@ -46,6 +53,15 @@ function readSecret(value: unknown): string | null {
   return null
 }
 
+function openDatabase(path: string): Database {
+  if ("Bun" in globalThis) {
+    const { Database: BunDatabase } = requireModule("bun:sqlite")
+    return new BunDatabase(path, { readonly: true })
+  }
+  const { DatabaseSync } = requireModule("node:sqlite")
+  return new DatabaseSync(path, { readOnly: true })
+}
+
 // Reads the secret straight from OpenCode's SQLite store. This is an internal
 // schema, so every failure mode (missing table, missing driver, locked file)
 // degrades to "no key" instead of throwing into the widget.
@@ -53,34 +69,22 @@ function keyFromCredentialStore(dataHome: string): string | null {
   const path = join(dataHome, "opencode", "opencode.db")
   if (!existsSync(path)) return null
 
-  let database: { prepare: (sql: string) => { get: (id: string) => unknown }; close?: () => void } | undefined
+  let database: Database | null = null
   try {
-    if (typeof (globalThis as { Bun?: unknown }).Bun !== "undefined") {
-      const { Database } = requireModule("bun:sqlite")
-      database = new Database(path, { readonly: true })
-    } else {
-      const { DatabaseSync } = requireModule("node:sqlite")
-      database = new DatabaseSync(path, { readOnly: true })
-    }
-    const row = database!.prepare(CREDENTIAL_QUERY).get(INTEGRATION_ID) as { value?: unknown } | undefined
+    database = openDatabase(path)
+    const row = database.prepare(CREDENTIAL_QUERY).get(INTEGRATION_ID) as { value?: unknown } | undefined
     if (!row) return null
-    // `value` is a JSON blob; a bare string is also accepted for compatibility.
-    return readSecret(safeJson(row.value)) ?? readSecret(row.value)
+
+    // `value` is normally a JSON blob. A bare string is only accepted when the
+    // row is not structured, so an OAuth blob is never sent as a bearer token.
+    const parsed = safeJson(row.value)
+    return readSecret(parsed) ?? (parsed === null ? readSecret(row.value) : null)
   } catch {
     return null
   } finally {
     try {
-      database?.close?.()
+      database?.close()
     } catch {}
-  }
-}
-
-function safeJson(value: unknown): unknown {
-  if (typeof value !== "string") return null
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
   }
 }
 
@@ -88,27 +92,18 @@ async function keyFromAuthFile(dataHome: string): Promise<string | null> {
   try {
     const raw = await readFile(join(dataHome, "opencode", "auth.json"), "utf-8")
     const auth = JSON.parse(raw) as Record<string, unknown> | null
-    const entry = auth?.[INTEGRATION_ID]
-    return readSecret(entry)
+    return readSecret(auth?.[INTEGRATION_ID])
   } catch {
     return null
   }
 }
 
-export async function resolveCredential(options: ResolveOptions = {}): Promise<Credential | null> {
+export async function resolveCredential(options: ResolveOptions = {}): Promise<string | null> {
   const env = options.env ?? process.env
   const dataHome = options.dataHome ?? defaultDataHome()
 
   const fromEnv = env[ENV_API_KEY]
-  if (typeof fromEnv === "string" && fromEnv.trim()) {
-    return { key: fromEnv.trim(), source: "env" }
-  }
+  if (typeof fromEnv === "string" && fromEnv.trim()) return fromEnv.trim()
 
-  const fromStore = keyFromCredentialStore(dataHome)
-  if (fromStore) return { key: fromStore, source: "credential_store" }
-
-  const fromFile = await keyFromAuthFile(dataHome)
-  if (fromFile) return { key: fromFile, source: "auth_file" }
-
-  return null
+  return keyFromCredentialStore(dataHome) ?? (await keyFromAuthFile(dataHome))
 }

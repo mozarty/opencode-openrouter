@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { bar, money, percent, severity, shortenId } from "../src/format.ts"
+import { bar, money, percent, severity, shortenId, workspaceLabel } from "../src/format.ts"
 
 describe("money", () => {
   it("renders a placeholder for missing values", () => {
@@ -16,7 +16,10 @@ describe("money", () => {
 
   it("keeps precision for sub-cent spend", () => {
     assert.equal(money(0.004), "$0.0040")
-    assert.equal(money(-0.004), "$-0.0040")
+  })
+
+  it("places the sign of a sub-cent balance before the currency", () => {
+    assert.equal(money(-0.004), "-$0.0040")
   })
 
   it("keeps negative balances legible", () => {
@@ -36,10 +39,6 @@ describe("percent", () => {
 
   it("reports overspending instead of clamping at 100%", () => {
     assert.equal(percent(1.5), "150%")
-  })
-
-  it("floors negative percentages at zero", () => {
-    assert.equal(percent(-0.2), "0%")
   })
 })
 
@@ -77,5 +76,22 @@ describe("shortenId", () => {
   it("truncates workspace ids", () => {
     assert.equal(shortenId("0445f0d2-3ce6-461e-8573-91a27bcb48d2"), "0445f0d2")
     assert.equal(shortenId(null), "unknown")
+  })
+})
+
+describe("workspaceLabel", () => {
+  const labels = { ws_configured: "Team" }
+
+  it("prefers the name reported by the API", () => {
+    assert.equal(workspaceLabel("ws_configured", "Hackathon", labels), "Hackathon")
+  })
+
+  it("falls back to a configured label", () => {
+    assert.equal(workspaceLabel("ws_configured", null, labels), "Team")
+  })
+
+  it("falls back to the shortened id", () => {
+    assert.equal(workspaceLabel("ws_unknown", null, labels), "ws_unkno")
+    assert.equal(workspaceLabel(null, null, labels), "unknown")
   })
 })

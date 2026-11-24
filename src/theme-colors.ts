@@ -7,7 +7,7 @@ export type Rgba = { toInts(): [number, number, number, number] }
 
 export type PaletteTokens = {
   readonly accent: Rgba
-  readonly muted: Rgba
+  readonly label: Rgba
   readonly base: Rgba
   readonly info: Rgba
   readonly secondary: Rgba
@@ -33,6 +33,50 @@ function channel(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)))
 }
 
+function relativeLuminance(color: Rgba): number {
+  const [r, g, b] = color.toInts()
+  const linear = (value: number) => {
+    const scaled = channel(value) / 255
+    return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+export function contrastRatio(a: Rgba, b: Rgba): number {
+  const lighter = Math.max(relativeLuminance(a), relativeLuminance(b))
+  const darker = Math.min(relativeLuminance(a), relativeLuminance(b))
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+// Colourfulness as the spread between the strongest and weakest channel.
+function vividness(color: Rgba): number {
+  const [r, g, b] = color.toInts()
+  return Math.max(r, g, b) - Math.min(r, g, b)
+}
+
+export const HUE_STEPS = [100, 200, 300, 400, 500, 600, 700, 800, 900] as const
+
+// Picks the most colourful candidate that still reads against the background.
+// Theme layout generations put the base colour on different steps (the legacy
+// layout favours 200, the current one 400), so the step is chosen from the
+// colours rather than hardcoded. The contrast floor only rules out shades that
+// are effectively invisible against the background.
+export function pickVivid(candidates: readonly (Rgba | undefined)[], background: Rgba, minContrast = 2): Rgba | null {
+  let picked: Rgba | null = null
+  let best = -1
+
+  for (const color of candidates) {
+    if (!color || contrastRatio(color, background) < minContrast) continue
+    const score = vividness(color)
+    if (score > best) {
+      best = score
+      picked = color
+    }
+  }
+
+  return picked
+}
+
 export function toHex(color: Rgba, alphaOverride?: number): string {
   const [r, g, b, a] = color.toInts()
   const channels = [channel(r), channel(g), channel(b)]
@@ -51,13 +95,13 @@ export function withAlpha(hex: string, alpha: number): string {
 }
 
 // Each metric gets its own hue from the theme instead of one flat text color:
-// accent chrome, blue "today", purple "average", green "forecast", and the
-// theme's warning/danger hues for budget pressure.
+// accent chrome, info "today", categorical "average", success "forecast", plus
+// the theme's warning/danger hues for budget pressure.
 export function buildPalette(tokens: PaletteTokens, options: { accentOverride?: string | null } = {}): Palette {
   const accent = options.accentOverride ?? toHex(tokens.accent)
   return {
     accent,
-    label: toHex(tokens.muted),
+    label: toHex(tokens.label),
     value: toHex(tokens.base),
     today: toHex(tokens.info),
     average: toHex(tokens.secondary),

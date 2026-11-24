@@ -7,17 +7,22 @@ const usd = new Intl.NumberFormat("en-US", {
   currency: "USD",
 })
 
+const usdPrecise = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 4,
+})
+
 export function money(value: number | null): string {
   if (value == null) return "-"
   if (value === 0) return "$0.00"
-  if (Math.abs(value) < 0.01) return `$${value.toFixed(4)}`
-  return usd.format(value)
+  return Math.abs(value) < 0.01 ? usdPrecise.format(value) : usd.format(value)
 }
 
-// Not clamped at 100%: overspending a cap is information worth showing.
 export function percent(pct: number | null): string {
   if (pct == null) return "-"
-  return `${Math.round(Math.max(0, pct) * 100)}%`
+  return `${Math.round(pct * 100)}%`
 }
 
 export function bar(pct: number | null, width: number): string {
@@ -36,4 +41,15 @@ export function severity(pct: number | null): Severity {
 export function shortenId(id: string | null, length = 8): string {
   if (!id) return "unknown"
   return id.slice(0, length)
+}
+
+// API workspace name wins, then a locally configured label, then the raw id.
+export function workspaceLabel(
+  workspace: string | null,
+  name: string | null,
+  labels: Readonly<Record<string, string>>,
+): string {
+  if (name) return name
+  const configured = workspace ? labels[workspace] : undefined
+  return configured ?? shortenId(workspace)
 }

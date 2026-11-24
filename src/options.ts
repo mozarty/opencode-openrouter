@@ -10,6 +10,7 @@ export type PluginOptions = {
 }
 
 export const MIN_REFRESH_INTERVAL_MS = 10_000
+export const MAX_REFRESH_INTERVAL_MS = 60 * 60_000
 export const DEFAULT_REFRESH_INTERVAL_MS = 30_000
 
 export const ENV_MANAGEMENT_KEY = "OPENROUTER_MANAGEMENT_KEY"
@@ -28,37 +29,41 @@ function asStringMap(value: unknown): Record<string, string> {
   return out
 }
 
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : ""
+}
+
 function asInterval(value: unknown): number {
   const wanted = asPositiveNumber(value)
   if (wanted == null) return DEFAULT_REFRESH_INTERVAL_MS
-  return Math.min(60 * 60_000, Math.max(MIN_REFRESH_INTERVAL_MS, Math.round(wanted)))
+  return Math.min(MAX_REFRESH_INTERVAL_MS, Math.max(MIN_REFRESH_INTERVAL_MS, Math.round(wanted)))
 }
 
 // Accepts #rgb, #rgba, #rrggbb and #rrggbbaa so the chrome can be re-tinted
-// without abandoning the theme's other hues.
+// without abandoning the theme's other hues. Shorthand is expanded so the
+// palette only ever sees six or eight digits.
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
 function asColor(value: unknown): string | null {
-  return typeof value === "string" && HEX_COLOR.test(value.trim()) ? value.trim() : null
+  if (typeof value !== "string") return null
+  const color = value.trim()
+  if (!HEX_COLOR.test(color)) return null
+  const body = color.slice(1)
+  return body.length <= 4 ? `#${[...body].map((digit) => digit.repeat(2)).join("")}` : color
 }
 
 export function parseOptions(
   raw: Readonly<Record<string, unknown>> | undefined,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): PluginOptions {
-  const managementKey =
-    (typeof raw?.managementKey === "string" && raw.managementKey.trim()) ||
-    (typeof env[ENV_MANAGEMENT_KEY] === "string" && env[ENV_MANAGEMENT_KEY]!.trim()) ||
-    null
-
-  const title = typeof raw?.title === "string" && raw.title.trim() ? raw.title.trim() : "OpenRouter"
+  const managementKey = asText(raw?.managementKey) || asText(env[ENV_MANAGEMENT_KEY]) || null
 
   return {
-    managementKey: managementKey || null,
+    managementKey,
     monthlyLimit: asPositiveNumber(raw?.monthlyLimit),
     workspaces: asStringMap(raw?.workspaces),
     refreshIntervalMs: asInterval(raw?.refreshIntervalMs),
-    title,
+    title: asText(raw?.title) || "OpenRouter",
     accent: asColor(raw?.accent),
   }
 }

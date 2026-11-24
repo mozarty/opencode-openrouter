@@ -78,13 +78,18 @@ readable and native in every theme instead of relying on hardcoded colours:
 
 | Element        | Theme source                     |
 | -------------- | -------------------------------- |
-| Frame, `◆`, dividers | `hue.accent` (step 200, 600 on light) |
-| Labels         | `text.muted`                     |
+| Frame, `◆`, dividers | most colourful `hue.accent` step that reads against the background |
+| Labels         | `text.base`                      |
 | Today          | `text.feedback.info`             |
-| Avg/day        | `categorical[0]` (200 / 600 on light) |
+| Avg/day        | the `categorical` hue furthest in colour from the accent, by the same rule |
 | Forecast       | `text.feedback.success`          |
 | Month + bar    | `text.base`, overridden by `feedback.warning` at 70% and `feedback.error` at 90% |
 | Remaining      | `feedback.success`, `feedback.error` when negative |
+
+Hue ramps differ between theme layout generations: the legacy layout puts a
+hue's base colour on step 200, the current one on step 400. Rather than pin a
+step, the palette takes the most colourful step that still clears a minimum
+contrast against the background, so both layouts resolve to the same shade.
 
 Set `accent` when you want the frame to carry its own identity, for example
 `"accent": "#ff8c3c"`. Only the frame changes; the metric hues still come from

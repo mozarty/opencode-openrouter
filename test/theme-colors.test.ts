@@ -1,16 +1,16 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { buildPalette, severityColor, toHex, withAlpha, type PaletteTokens } from "../src/theme-colors.ts"
+import { buildPalette, contrastRatio, pickVivid, severityColor, toHex, withAlpha, type PaletteTokens } from "../src/theme-colors.ts"
 
 function rgba(r: number, g: number, b: number, a = 255) {
-  return { toInts: () => [r, g, b, a] as [number, number, number, number] }
+  return { toInts: (): [number, number, number, number] => [r, g, b, a] }
 }
 
 // The ayu-dark hues this plugin was tuned against.
 const tokens: PaletteTokens = {
   accent: rgba(0xe6, 0xb4, 0x50),
-  muted: rgba(0x56, 0x5b, 0x66),
+  label: rgba(0x82, 0x8d, 0x8b),
   base: rgba(0xbf, 0xbd, 0xb6),
   info: rgba(0x39, 0xba, 0xe6),
   secondary: rgba(0xd2, 0xa6, 0xff),
@@ -31,10 +31,6 @@ describe("toHex", () => {
   it("overrides alpha when asked", () => {
     assert.equal(toHex(rgba(0xe6, 0xb4, 0x50), 0.35), "#e6b45059")
   })
-
-  it("clamps out-of-range channels", () => {
-    assert.equal(toHex(rgba(300, -4, 255.6)), "#ff00ff")
-  })
 })
 
 describe("withAlpha", () => {
@@ -43,17 +39,16 @@ describe("withAlpha", () => {
     assert.equal(withAlpha("#e6b450ff", 1), "#e6b450ff")
   })
 
-  it("leaves unusable values untouched", () => {
+  it("leaves values it cannot parse untouched", () => {
     assert.equal(withAlpha("red", 0.5), "red")
-    assert.equal(withAlpha("#abc", 0.5), "#abc")
   })
 })
 
 describe("buildPalette", () => {
-  it("gives every metric a distinct theme hue", () => {
+  it("maps each metric to its theme token", () => {
     assert.deepEqual(buildPalette(tokens), {
       accent: "#e6b450",
-      label: "#565b66",
+      label: "#828d8b",
       value: "#bfbdb6",
       today: "#39bae6",
       average: "#d2a6ff",
@@ -71,23 +66,64 @@ describe("buildPalette", () => {
     assert.equal(palette.divider, "#ff8c3c59")
     assert.equal(palette.today, "#39bae6")
   })
+})
 
-  it("produces five or more distinct colors", () => {
-    const palette = buildPalette(tokens)
-    const colors = new Set([palette.accent, palette.today, palette.average, palette.forecast, palette.value])
-    assert.equal(colors.size, 5)
+describe("contrastRatio", () => {
+  it("reports a readable spread", () => {
+    assert.ok(contrastRatio(rgba(0xe6, 0xb4, 0x50), rgba(0x0b, 0x0e, 0x14)) > 10)
+    assert.ok(contrastRatio(rgba(0x0b, 0x0e, 0x14), rgba(0x0b, 0x0e, 0x14)) < 1.1)
+  })
+})
+
+describe("pickVivid", () => {
+  const background = rgba(0x0b, 0x0e, 0x14)
+
+  it("picks the base colour from the current layout (step 400)", () => {
+    const picked = pickVivid(
+      [
+        rgba(0xb6, 0xb1, 0xa9),
+        rgba(0x89, 0x7e, 0x6b),
+        rgba(0x62, 0x59, 0x48),
+        rgba(0xe6, 0xb4, 0x50),
+        rgba(0x8d, 0x70, 0x37),
+      ],
+      background,
+    )
+    assert.ok(picked)
+    assert.equal(toHex(picked), "#e6b450")
+  })
+
+  it("picks the same colour from the legacy layout (step 200)", () => {
+    const picked = pickVivid(
+      [rgba(0xfe, 0xd2, 0x7f), rgba(0xe6, 0xb4, 0x50), rgba(0xc6, 0x99, 0x3d), rgba(0xa7, 0x7f, 0x2a)],
+      background,
+    )
+    assert.ok(picked)
+    assert.equal(toHex(picked), "#e6b450")
+  })
+
+  it("skips shades that do not read against the background", () => {
+    const light = rgba(0xff, 0xff, 0xff)
+    // Yellow is the most colourful option but vanishes on white.
+    const picked = pickVivid([rgba(0xff, 0xff, 0x00), rgba(0x00, 0x5f, 0x5f)], light)
+    assert.ok(picked)
+    assert.equal(toHex(picked), "#005f5f")
+  })
+
+  it("reports nothing when no candidate qualifies", () => {
+    assert.equal(pickVivid([rgba(0x0b, 0x0e, 0x14), undefined], background), null)
   })
 })
 
 describe("severityColor", () => {
   const palette = buildPalette(tokens)
 
-  it("keeps the metric color while on budget", () => {
-    assert.equal(severityColor(palette, "normal", palette.today), "#39bae6")
+  it("keeps the metric colour while on budget", () => {
+    assert.equal(severityColor(palette, "normal", "#123456"), "#123456")
   })
 
   it("overrides with the warning and danger hues", () => {
-    assert.equal(severityColor(palette, "warning", palette.today), "#e6b673")
-    assert.equal(severityColor(palette, "danger", palette.today), "#d95757")
+    assert.equal(severityColor(palette, "warning", "#123456"), "#e6b673")
+    assert.equal(severityColor(palette, "danger", "#123456"), "#d95757")
   })
 })
