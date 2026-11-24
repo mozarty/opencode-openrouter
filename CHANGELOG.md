@@ -21,14 +21,16 @@ First public release, extracted from a personal OpenCode config.
   `workspaces` label map as a fallback.
 - `openrouter.refresh` palette command for an immediate refresh.
 - Plugin options: `managementKey`, `monthlyLimit`, `workspaces`,
-  `refreshIntervalMs`, `title`.
+  `refreshIntervalMs`, `title`, `accent`.
 - Environment variables: `OPENROUTER_API_KEY`, `OPENROUTER_MANAGEMENT_KEY`.
-- Tests for budget resolution, pace projection, options parsing and formatting.
+- Tests for budget resolution, pace projection, options parsing, palette
+  mapping and formatting.
 
 ### Changed
 
-- Colours come from the active OpenCode theme instead of hardcoded hex values,
-  so the widget looks native in every theme.
+- Every metric takes a different hue from the active theme — accent frame,
+  info "Today", categorical "Avg/day", success "Forecast" — instead of one flat
+  text colour, with warning/danger overriding on budget pressure.
 - Configuration moved from `~/.config/opencode/openrouter-local.json` to
   documented plugin options in `cli.json`, with secrets read from the
   environment.

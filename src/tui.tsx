@@ -3,12 +3,12 @@
 // monthly budget bar and a month-end forecast.
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal } from "solid-js"
-import type { RGBA } from "@opentui/core"
 import type { Context } from "@opencode/plugin/tui/context"
 
 import { ENV_API_KEY, INTEGRATION_ID, resolveCredential } from "./credentials"
-import { bar, money, percent, severity, shortenId, type Severity } from "./format"
+import { bar, money, percent, severity, shortenId } from "./format"
 import { parseOptions, type PluginOptions } from "./options"
+import { buildPalette, severityColor, type Palette, type PaletteTokens } from "./theme-colors"
 import {
   fetchSnapshot,
   resolveMonthlyLimit,
@@ -27,42 +27,21 @@ const MIN_FETCH_INTERVAL_MS = 5_000
 type Reason = SnapshotFailure | "no-key" | "not-configured" | "needs-auth"
 type Status = "loading" | "ready" | "error"
 
-type Palette = {
-  chrome: string
-  label: string
-  value: string
-  warning: string
-  danger: string
-  success: string
-  divider: string
-}
-
-// Theme tokens are RGBA instances. Hex strings keep the span reconciler on its
-// parseColor() string path and avoid RGBA class-instance mismatches on update.
-function toHex(color: RGBA, alphaOverride?: number): string {
-  const [r, g, b, a] = color.toInts()
-  const alpha = alphaOverride == null ? a : Math.round(Math.max(0, Math.min(1, alphaOverride)) * 255)
-  const channels = [r, g, b]
-  if (alpha !== 255) channels.push(alpha)
-  return `#${channels.map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`
-}
-
-function palette(theme: Context["theme"]): Palette {
+// Pulls distinct hues out of the theme so every metric is its own color. Hue
+// ramps run bright (100) to dark (900), so dark mode takes a low step and light
+// mode a high one.
+function themeTokens(theme: Context["theme"], mode: Context["themeMode"]): PaletteTokens {
+  const step = mode === "light" ? 600 : 200
   return {
-    chrome: toHex(theme.text.action.primary.base),
-    label: toHex(theme.text.muted),
-    value: toHex(theme.text.base),
-    warning: toHex(theme.text.feedback.warning.base),
-    danger: toHex(theme.text.feedback.error.base),
-    success: toHex(theme.text.feedback.success.base),
-    divider: toHex(theme.text.action.primary.base, 0.35),
+    accent: theme.hue.accent[step],
+    muted: theme.text.muted,
+    base: theme.text.base,
+    info: theme.text.feedback.info.base,
+    secondary: theme.categorical[0]?.[step] ?? theme.text.feedback.info.base,
+    warning: theme.text.feedback.warning.base,
+    danger: theme.text.feedback.error.base,
+    success: theme.text.feedback.success.base,
   }
-}
-
-function severityColor(colors: Palette, value: Severity): string {
-  if (value === "danger") return colors.danger
-  if (value === "warning") return colors.warning
-  return colors.value
 }
 
 const REASON: Record<Reason, { label: string; hint?: string }> = {
@@ -225,7 +204,7 @@ export default Plugin.define({
     const disposeSlot = context.ui.slot({
       append: "sidebar.content",
       render: () => {
-        const colors = palette(context.theme)
+        const colors = buildPalette(themeTokens(context.theme, context.themeMode), { accentOverride: options.accent })
         const current = status()
         const data = snapshot()
         const stale = current === "error" && data != null
@@ -235,9 +214,9 @@ export default Plugin.define({
           <box
             border={true}
             borderStyle="rounded"
-            borderColor={colors.chrome}
+            borderColor={colors.accent}
             title={` ${options.title} `}
-            titleColor={colors.chrome}
+            titleColor={colors.accent}
             padding={1}
           >
             {stale && activeReason && <Notice colors={colors} reason={activeReason} stale={true} />}
@@ -253,10 +232,10 @@ export default Plugin.define({
               (() => {
                 const limit = resolveMonthlyLimit(data, options)
                 const pace = resolveMonthlyPace(data.monthly)
-                const monthColor = severityColor(colors, severity(limit.pct))
+                const monthColor = severityColor(colors, severity(limit.pct), colors.value)
                 const forecastPct =
                   limit.total != null && limit.total > 0 && pace.projected != null ? pace.projected / limit.total : null
-                const forecastColor = severityColor(colors, severity(forecastPct))
+                const forecastColor = severityColor(colors, severity(forecastPct), colors.forecast)
                 const remainingColor = limit.remaining != null && limit.remaining < 0 ? colors.danger : colors.success
                 const monthSuffix = limit.total != null ? ` / ${money(limit.total)}` : undefined
                 const barText = limit.pct != null ? `${bar(limit.pct, BAR_WIDTH)} ${percent(limit.pct)}` : undefined
@@ -265,7 +244,7 @@ export default Plugin.define({
                 return (
                   <>
                     <text>
-                      <span style={{ fg: colors.chrome }}>◆ </span>
+                      <span style={{ fg: colors.accent }}>◆ </span>
                       <span style={{ fg: colors.label }}>{workspaceLabel(data, options)}</span>
                       {limit.remaining != null && (
                         <span style={{ fg: remainingColor }}>{`  ${money(limit.remaining)}`}</span>
@@ -273,9 +252,9 @@ export default Plugin.define({
                     </text>
                     <box>
                       <text>{" "}</text>
-                      <Row colors={colors} label="Today" value={money(data.daily)} />
+                      <Row colors={colors} label="Today" value={money(data.daily)} color={colors.today} />
                       <Divider colors={colors} width={width} />
-                      <Row colors={colors} label="Avg/day" value={money(pace.averagePerDay)} />
+                      <Row colors={colors} label="Avg/day" value={money(pace.averagePerDay)} color={colors.average} />
                       <Divider colors={colors} width={width} />
                       <Row colors={colors} label="Forecast" value={money(pace.projected)} color={forecastColor} />
                       <Divider colors={colors} width={width} />

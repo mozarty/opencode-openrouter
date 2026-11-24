@@ -69,6 +69,26 @@ Options are passed through the plugin entry:
 | `workspaces`        | `Record<string,string>`  | `{}`        | Local labels for workspace ids, for keys that cannot list workspaces.                         |
 | `refreshIntervalMs` | `number`                 | `30000`     | Poll interval, clamped to 10s–1h. Spend is also refreshed after every model turn.             |
 | `title`             | `string`                 | `OpenRouter`| Box title.                                                                                    |
+| `accent`            | `string`                 | theme       | Hex colour for the frame, title and dividers (`#rgb`, `#rrggbb` or `#rrggbbaa`).              |
+
+### Colours
+
+Each metric takes a different hue from the active theme, so the widget stays
+readable and native in every theme instead of relying on hardcoded colours:
+
+| Element        | Theme source                     |
+| -------------- | -------------------------------- |
+| Frame, `◆`, dividers | `hue.accent` (step 200, 600 on light) |
+| Labels         | `text.muted`                     |
+| Today          | `text.feedback.info`             |
+| Avg/day        | `categorical[0]` (200 / 600 on light) |
+| Forecast       | `text.feedback.success`          |
+| Month + bar    | `text.base`, overridden by `feedback.warning` at 70% and `feedback.error` at 90% |
+| Remaining      | `feedback.success`, `feedback.error` when negative |
+
+Set `accent` when you want the frame to carry its own identity, for example
+`"accent": "#ff8c3c"`. Only the frame changes; the metric hues still come from
+the theme.
 
 ### Environment
 

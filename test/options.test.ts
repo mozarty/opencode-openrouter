@@ -50,4 +50,15 @@ describe("parseOptions", () => {
   it("ignores a malformed workspaces value", () => {
     assert.deepEqual(parseOptions({ workspaces: ["nope"] }, {}).workspaces, {})
   })
+
+  it("accepts hex accent overrides", () => {
+    assert.equal(parseOptions({ accent: "#ff8c3c" }, {}).accent, "#ff8c3c")
+    assert.equal(parseOptions({ accent: " #abc " }, {}).accent, "#abc")
+  })
+
+  it("rejects non-hex accent values", () => {
+    assert.equal(parseOptions({ accent: "orange" }, {}).accent, null)
+    assert.equal(parseOptions({ accent: "ff8c3c" }, {}).accent, null)
+    assert.equal(parseOptions(undefined, {}).accent, null)
+  })
 })

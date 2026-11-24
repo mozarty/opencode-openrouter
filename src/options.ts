@@ -6,6 +6,7 @@ export type PluginOptions = {
   readonly workspaces: Readonly<Record<string, string>>
   readonly refreshIntervalMs: number
   readonly title: string
+  readonly accent: string | null
 }
 
 export const MIN_REFRESH_INTERVAL_MS = 10_000
@@ -33,6 +34,14 @@ function asInterval(value: unknown): number {
   return Math.min(60 * 60_000, Math.max(MIN_REFRESH_INTERVAL_MS, Math.round(wanted)))
 }
 
+// Accepts #rgb, #rgba, #rrggbb and #rrggbbaa so the chrome can be re-tinted
+// without abandoning the theme's other hues.
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+
+function asColor(value: unknown): string | null {
+  return typeof value === "string" && HEX_COLOR.test(value.trim()) ? value.trim() : null
+}
+
 export function parseOptions(
   raw: Readonly<Record<string, unknown>> | undefined,
   env: Readonly<Record<string, string | undefined>> = process.env,
@@ -50,5 +59,6 @@ export function parseOptions(
     workspaces: asStringMap(raw?.workspaces),
     refreshIntervalMs: asInterval(raw?.refreshIntervalMs),
     title,
+    accent: asColor(raw?.accent),
   }
 }
