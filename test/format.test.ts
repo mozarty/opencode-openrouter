@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { bar, money, percent, severity, shortenId, workspaceLabel } from "../src/format.ts"
+import { bar, money, percent, severity } from "../src/format.ts"
 
 describe("money", () => {
   it("renders a placeholder for missing values", () => {
@@ -69,29 +69,5 @@ describe("severity", () => {
     assert.equal(severity(0.89), "warning")
     assert.equal(severity(0.9), "danger")
     assert.equal(severity(1.4), "danger")
-  })
-})
-
-describe("shortenId", () => {
-  it("truncates workspace ids", () => {
-    assert.equal(shortenId("0445f0d2-3ce6-461e-8573-91a27bcb48d2"), "0445f0d2")
-    assert.equal(shortenId(null), "unknown")
-  })
-})
-
-describe("workspaceLabel", () => {
-  const labels = { ws_configured: "Team" }
-
-  it("prefers the name reported by the API", () => {
-    assert.equal(workspaceLabel("ws_configured", "Hackathon", labels), "Hackathon")
-  })
-
-  it("falls back to a configured label", () => {
-    assert.equal(workspaceLabel("ws_configured", null, labels), "Team")
-  })
-
-  it("falls back to the shortened id", () => {
-    assert.equal(workspaceLabel("ws_unknown", null, labels), "ws_unkno")
-    assert.equal(workspaceLabel(null, null, labels), "unknown")
   })
 })

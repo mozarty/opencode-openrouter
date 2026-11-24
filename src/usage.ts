@@ -1,24 +1,17 @@
-// Talks to the OpenRouter API and reconciles key/workspace budgets into the
-// snapshot the sidebar renders. Network and parsing failures are reported as a
-// discriminated result so the widget can tell "bad key" from "offline".
+// Talks to the OpenRouter API and reconciles key budgets into the snapshot the
+// sidebar renders. Network and parsing failures are reported as a discriminated
+// result so the widget can tell "bad key" from "offline".
 export type Snapshot = {
   daily: number | null
   monthly: number | null
   limitTotal: number | null
   limitRemaining: number | null
-  workspace: string | null
-  workspaceName: string | null
 }
 
 export type MonthlyLimit = {
   total: number | null
   remaining: number | null
   pct: number | null
-}
-
-export type MonthlyPace = {
-  averagePerDay: number | null
-  projected: number | null
 }
 
 export type SnapshotFailure = "unauthorized" | "unavailable"
@@ -29,7 +22,6 @@ export type SnapshotResult =
 
 const API_BASE = "https://openrouter.ai/api/v1"
 const REQUEST_TIMEOUT_MS = 10_000
-const WORKSPACE_CACHE_TTL_MS = 10 * 60_000
 
 type BudgetEntry = {
   scope?: string
@@ -41,8 +33,6 @@ type BudgetEntry = {
 }
 
 type FetchResult = { status: number; body: unknown }
-
-let workspaceCache: { key: string; at: number; map: Map<string, string> } | null = null
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -75,37 +65,6 @@ async function request(url: string, key: string, signal?: AbortSignal): Promise<
   }
 }
 
-async function workspaceNames(managementKey: string, signal?: AbortSignal): Promise<Map<string, string>> {
-  const cached = workspaceCache
-  if (cached && cached.key === managementKey && Date.now() - cached.at < WORKSPACE_CACHE_TTL_MS) {
-    return cached.map
-  }
-
-  const res = await request(`${API_BASE}/workspaces`, managementKey, signal)
-  const list = record(res?.body)
-  const map = new Map<string, string>()
-  if (Array.isArray(list?.data)) {
-    for (const item of list.data) {
-      const workspace = record(item)
-      if (typeof workspace?.id === "string" && typeof workspace.name === "string") {
-        map.set(workspace.id, workspace.name)
-      }
-    }
-  }
-
-  // Only cache a successful listing; a bad management key should be retried.
-  if (res?.status === 200 && map.size > 0) {
-    workspaceCache = { key: managementKey, at: Date.now(), map }
-  }
-  return map
-}
-
-// Lets an explicit refresh pick up renamed or deleted workspaces instead of
-// serving the cached listing until it expires.
-export function resetWorkspaceCache(): void {
-  workspaceCache = null
-}
-
 // A monthly budget is the current window when it resets at the next UTC month
 // boundary. A budget without `resets_at` is treated as current.
 function isCurrentMonthlyWindow(resetsAt: unknown): boolean {
@@ -136,15 +95,8 @@ function pickMemberMonthlyBudget(keyData: Record<string, unknown>, budgets: unkn
   )
 }
 
-export async function fetchSnapshot(
-  key: string,
-  managementKey: string | null,
-  signal?: AbortSignal,
-): Promise<SnapshotResult> {
-  const [keyInfo, names] = await Promise.all([
-    request(`${API_BASE}/auth/key`, key, signal),
-    managementKey ? workspaceNames(managementKey, signal) : Promise.resolve(null),
-  ])
+export async function fetchSnapshot(key: string, signal?: AbortSignal): Promise<SnapshotResult> {
+  const keyInfo = await request(`${API_BASE}/auth/key`, key, signal)
 
   if (!keyInfo) return { ok: false, reason: "unavailable" }
   if (keyInfo.status === 401 || keyInfo.status === 403) return { ok: false, reason: "unauthorized" }
@@ -152,9 +104,6 @@ export async function fetchSnapshot(
 
   const data = record(record(keyInfo.body)?.data)
   if (!data) return { ok: false, reason: "unavailable" }
-
-  const workspace = typeof data.workspace_id === "string" && data.workspace_id ? data.workspace_id : null
-  const workspaceName = workspace && names ? (names.get(workspace) ?? null) : null
 
   const budgets = Array.isArray(data.budgets) ? data.budgets : []
   const memberBudget = pickMemberMonthlyBudget(data, budgets)
@@ -166,8 +115,6 @@ export async function fetchSnapshot(
       monthly: num(memberBudget?.spend_usd) ?? num(data.usage_monthly),
       limitTotal: num(memberBudget?.limit_usd) ?? num(data.limit),
       limitRemaining: num(memberBudget?.remaining_usd) ?? num(data.limit_remaining),
-      workspace,
-      workspaceName,
     },
   }
 }
@@ -201,14 +148,8 @@ export function spendRatio(spend: number | null, total: number | null): number |
   return spend != null && total != null && total > 0 ? spend / total : null
 }
 
-// Uses elapsed UTC calendar days, today included, to estimate this month's
-// average daily spend and the month-end total at the same pace.
-export function resolveMonthlyPace(monthly: number | null, now = new Date()): MonthlyPace {
-  if (monthly == null) return { averagePerDay: null, projected: null }
-
-  const daysElapsed = now.getUTCDate()
-  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate()
-  const averagePerDay = monthly / daysElapsed
-
-  return { averagePerDay, projected: averagePerDay * daysInMonth }
+// Average spend per elapsed UTC day this month, today included.
+export function averagePerDay(monthly: number | null, now = new Date()): number | null {
+  if (monthly == null) return null
+  return monthly / now.getUTCDate()
 }

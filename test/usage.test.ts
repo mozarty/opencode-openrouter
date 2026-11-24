@@ -2,10 +2,9 @@ import assert from "node:assert/strict"
 import { describe, it, type TestContext } from "node:test"
 
 import {
+  averagePerDay,
   fetchSnapshot,
-  resetWorkspaceCache,
   resolveMonthlyLimit,
-  resolveMonthlyPace,
   spendRatio,
   type Snapshot,
 } from "../src/usage.ts"
@@ -31,8 +30,6 @@ const emptySnapshot: Snapshot = {
   monthly: null,
   limitTotal: null,
   limitRemaining: null,
-  workspace: null,
-  workspaceName: null,
 }
 
 describe("spendRatio", () => {
@@ -70,14 +67,13 @@ describe("resolveMonthlyLimit", () => {
   })
 })
 
-describe("resolveMonthlyPace", () => {
-  it("projects month-end spend from elapsed UTC days", () => {
-    const pace = resolveMonthlyPace(30, new Date(Date.UTC(2024, 1, 15)))
-    assert.deepEqual(pace, { averagePerDay: 2, projected: 58 })
+describe("averagePerDay", () => {
+  it("divides month spend by elapsed UTC days", () => {
+    assert.equal(averagePerDay(30, new Date(Date.UTC(2024, 1, 15))), 2)
   })
 
-  it("has no projection without spend", () => {
-    assert.deepEqual(resolveMonthlyPace(null), { averagePerDay: null, projected: null })
+  it("has no average without spend", () => {
+    assert.equal(averagePerDay(null), null)
   })
 })
 
@@ -85,20 +81,20 @@ describe("fetchSnapshot", () => {
   for (const status of [401, 403]) {
     it(`reports HTTP ${status} as a rejected key rather than an outage`, async (t) => {
       mockFetch(t, () => ({ status, body: { error: "invalid key" } }))
-      assert.deepEqual(await fetchSnapshot("sk-or-bad", null), { ok: false, reason: "unauthorized" })
+      assert.deepEqual(await fetchSnapshot("sk-or-bad"), { ok: false, reason: "unauthorized" })
     })
   }
 
   it("reports a server error as unavailable", async (t) => {
     mockFetch(t, () => ({ status: 503, body: null }))
-    assert.deepEqual(await fetchSnapshot("sk-or-any", null), { ok: false, reason: "unavailable" })
+    assert.deepEqual(await fetchSnapshot("sk-or-any"), { ok: false, reason: "unavailable" })
   })
 
   it("reports a network failure as unavailable", async (t) => {
     mockFetch(t, () => {
       throw new Error("ECONNRESET")
     })
-    assert.deepEqual(await fetchSnapshot("sk-or-any", null), { ok: false, reason: "unavailable" })
+    assert.deepEqual(await fetchSnapshot("sk-or-any"), { ok: false, reason: "unavailable" })
   })
 
   it("authenticates the key request", async (t) => {
@@ -108,54 +104,47 @@ describe("fetchSnapshot", () => {
       return { status: 200, body: { data: { usage_monthly: 1 } } }
     })
 
-    await fetchSnapshot("sk-or-secret", null)
+    await fetchSnapshot("sk-or-secret")
     const sent = headers as Record<string, string>
     assert.equal(sent.Authorization, "Bearer sk-or-secret")
     assert.equal(sent.Accept, "application/json")
   })
 
   it("prefers the member-scoped monthly budget", async (t) => {
-    mockFetch(t, (url) =>
-      url.endsWith("/auth/key")
-        ? {
-            status: 200,
-            body: {
-              data: {
-                usage_daily: 2,
-                workspace_id: "ws_member",
-                budgets: [
-                  {
-                    scope: "workspace_default_member",
-                    reset_interval: "monthly",
-                    resets_at: nextMonthStart(),
-                    spend_usd: 99,
-                    limit_usd: 999,
-                    remaining_usd: 900,
-                  },
-                  {
-                    scope: "member",
-                    reset_interval: "monthly",
-                    resets_at: nextMonthStart(),
-                    spend_usd: 45,
-                    limit_usd: 100,
-                    remaining_usd: 55,
-                  },
-                ],
-              },
+    mockFetch(t, () => ({
+      status: 200,
+      body: {
+        data: {
+          usage_daily: 2,
+          budgets: [
+            {
+              scope: "workspace_default_member",
+              reset_interval: "monthly",
+              resets_at: nextMonthStart(),
+              spend_usd: 99,
+              limit_usd: 999,
+              remaining_usd: 900,
             },
-          }
-        : { status: 404, body: null },
-    )
+            {
+              scope: "member",
+              reset_interval: "monthly",
+              resets_at: nextMonthStart(),
+              spend_usd: 45,
+              limit_usd: 100,
+              remaining_usd: 55,
+            },
+          ],
+        },
+      },
+    }))
 
-    const result = await fetchSnapshot("sk-or-member", null)
+    const result = await fetchSnapshot("sk-or-member")
     assert.ok(result.ok, "expected a snapshot")
     assert.deepEqual(result.snapshot, {
       daily: 2,
       monthly: 45,
       limitTotal: 100,
       limitRemaining: 55,
-      workspace: "ws_member",
-      workspaceName: null,
     })
   })
 
@@ -177,15 +166,13 @@ describe("fetchSnapshot", () => {
       },
     }))
 
-    const result = await fetchSnapshot("sk-or-effective", null)
+    const result = await fetchSnapshot("sk-or-effective")
     assert.ok(result.ok, "expected a snapshot")
     assert.deepEqual(result.snapshot, {
       daily: 1,
       monthly: 12,
       limitTotal: 50,
       limitRemaining: 38,
-      workspace: null,
-      workspaceName: null,
     })
   })
 
@@ -199,7 +186,7 @@ describe("fetchSnapshot", () => {
       },
     }))
 
-    const result = await fetchSnapshot("sk-or-no-reset", null)
+    const result = await fetchSnapshot("sk-or-no-reset")
     assert.ok(result.ok, "expected a snapshot")
     assert.equal(result.snapshot.monthly, 8)
     assert.equal(result.snapshot.limitTotal, 40)
@@ -225,59 +212,13 @@ describe("fetchSnapshot", () => {
       },
     }))
 
-    const result = await fetchSnapshot("sk-or-stale-window", null)
+    const result = await fetchSnapshot("sk-or-stale-window")
     assert.ok(result.ok, "expected a snapshot")
     assert.deepEqual(result.snapshot, {
       daily: null,
       monthly: 7,
       limitTotal: null,
       limitRemaining: null,
-      workspace: null,
-      workspaceName: null,
     })
-  })
-
-  it("resolves the workspace name from the management API", async (t) => {
-    mockFetch(t, (url) =>
-      url.endsWith("/workspaces")
-        ? { status: 200, body: { data: [{ id: "ws_named", name: "Hackathon" }] } }
-        : { status: 200, body: { data: { usage_monthly: 1, workspace_id: "ws_named" } } },
-    )
-
-    const result = await fetchSnapshot("sk-or-named", "management-key-named")
-    assert.ok(result.ok, "expected a snapshot")
-    assert.equal(result.snapshot.workspaceName, "Hackathon")
-  })
-
-  it("reuses the cached workspace listing within the TTL", async (t) => {
-    let listings = 0
-    mockFetch(t, (url) => {
-      if (url.endsWith("/workspaces")) {
-        listings += 1
-        return { status: 200, body: { data: [{ id: "ws_cached", name: "BoT" }] } }
-      }
-      return { status: 200, body: { data: { usage_monthly: 1, workspace_id: "ws_cached" } } }
-    })
-
-    try {
-      await fetchSnapshot("sk-or-cached", "management-key-cached")
-      await fetchSnapshot("sk-or-cached", "management-key-cached")
-      assert.equal(listings, 1)
-    } finally {
-      resetWorkspaceCache()
-    }
-  })
-
-  it("still renders usage when the management key is rejected", async (t) => {
-    mockFetch(t, (url) =>
-      url.endsWith("/workspaces")
-        ? { status: 401, body: null }
-        : { status: 200, body: { data: { usage_monthly: 3, workspace_id: "ws_unnamed" } } },
-    )
-
-    const result = await fetchSnapshot("sk-or-unnamed", "management-key-unnamed")
-    assert.ok(result.ok, "expected a snapshot")
-    assert.equal(result.snapshot.workspaceName, null)
-    assert.equal(result.snapshot.monthly, 3)
   })
 })

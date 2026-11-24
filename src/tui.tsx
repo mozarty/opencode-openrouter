@@ -1,20 +1,18 @@
 /** @jsxImportSource @opentui/solid */
 // Sidebar widget: polls OpenRouter usage and renders daily/monthly spend, the
-// monthly budget bar and a month-end forecast.
+// monthly budget bar and the remaining budget.
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal } from "solid-js"
 import type { Context } from "@opencode/plugin/tui/context"
 
 import { ENV_API_KEY, INTEGRATION_ID, resolveCredential } from "./credentials"
-import { bar, money, percent, severity, workspaceLabel } from "./format"
+import { bar, money, percent, severity } from "./format"
 import { parseOptions, type PluginOptions } from "./options"
 import { buildPalette, HUE_STEPS, pickVivid, severityColor, toHex, type Palette, type PaletteTokens } from "./theme-colors"
 import {
+  averagePerDay,
   fetchSnapshot,
-  resetWorkspaceCache,
   resolveMonthlyLimit,
-  resolveMonthlyPace,
-  spendRatio,
   type Snapshot,
   type SnapshotFailure,
 } from "./usage"
@@ -113,45 +111,39 @@ const Notice = (props: { colors: Palette; reason: Reason; stale: boolean }) => {
 const Usage = (props: { colors: Palette; data: Snapshot; options: PluginOptions }) => {
   const { colors, data, options } = props
   const limit = resolveMonthlyLimit(data, options.monthlyLimit)
-  const pace = resolveMonthlyPace(data.monthly)
 
   const daily = money(data.daily)
-  const average = money(pace.averagePerDay)
-  const forecast = money(pace.projected)
+  const dailyAverage = money(averagePerDay(data.monthly))
   const month = money(data.monthly)
   const monthSuffix = limit.total != null ? ` / ${money(limit.total)}` : ""
   const barText = limit.pct != null ? `${bar(limit.pct, BAR_WIDTH)} ${percent(limit.pct)}` : ""
+  const remaining = limit.remaining != null ? money(limit.remaining) : ""
 
   // The rule spans the widest rendered row, so derive it from the formatted
   // strings that are actually drawn instead of re-formatting the numbers.
   const widest = Math.max(
-    ...[daily, average, forecast, `${month}${monthSuffix}`, barText].map((value) => LABEL_WIDTH + value.length),
+    ...[daily, dailyAverage, `${month}${monthSuffix}`, barText, remaining].map((value) => LABEL_WIDTH + value.length),
   )
   const width = Math.max(DIVIDER_MIN_WIDTH, widest + DIVIDER_OVERSHOOT)
 
   const monthColor = severityColor(colors, severity(limit.pct), colors.value)
-  const forecastColor = severityColor(colors, severity(spendRatio(pace.projected, limit.total)), colors.forecast)
   const remainingColor = limit.remaining != null && limit.remaining < 0 ? colors.danger : colors.success
 
   return (
-    <>
-      <text>
-        <span style={{ fg: colors.accent }}>◆ </span>
-        <span style={{ fg: colors.label }}>{workspaceLabel(data.workspace, data.workspaceName, options.workspaces)}</span>
-        {limit.remaining != null && <span style={{ fg: remainingColor }}>{`  ${money(limit.remaining)}`}</span>}
-      </text>
-      <box>
-        <text>{" "}</text>
-        <Row colors={colors} label="Today" value={daily} color={colors.today} />
-        <Divider colors={colors} width={width} />
-        <Row colors={colors} label="Avg/day" value={average} color={colors.average} />
-        <Divider colors={colors} width={width} />
-        <Row colors={colors} label="Forecast" value={forecast} color={forecastColor} />
-        <Divider colors={colors} width={width} />
-        <Row colors={colors} label="Month" value={month} color={monthColor} suffix={monthSuffix} />
-        {barText && <Row colors={colors} label="" value={barText} color={monthColor} />}
-      </box>
-    </>
+    <box>
+      <Row colors={colors} label="Today" value={daily} color={colors.today} />
+      <Divider colors={colors} width={width} />
+      {remaining && (
+        <>
+          <Row colors={colors} label="Remaining" value={remaining} color={remainingColor} />
+          <Divider colors={colors} width={width} />
+        </>
+      )}
+      <Row colors={colors} label="Month" value={month} color={monthColor} suffix={monthSuffix} />
+      {barText && <Row colors={colors} label="" value={barText} color={monthColor} />}
+      <Divider colors={colors} width={width} />
+      <Row colors={colors} label="Avg/day" value={dailyAverage} color={colors.average} />
+    </box>
   )
 }
 
@@ -187,7 +179,7 @@ export default Plugin.define({
         return
       }
 
-      const result = await fetchSnapshot(credential, options.managementKey, controller.signal)
+      const result = await fetchSnapshot(credential, controller.signal)
       if (disposed || controller.signal.aborted) return
 
       if (result.ok) {
@@ -226,7 +218,6 @@ export default Plugin.define({
       context.data.on("credential.updated", () => void loadCredential()),
       context.data.on("integration.updated", () => {
         context.data.location.integration.invalidate(context.location)
-        resetWorkspaceCache()
         void refresh(true)
       }),
     ]

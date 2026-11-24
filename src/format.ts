@@ -37,19 +37,3 @@ export function severity(pct: number | null): Severity {
   if (pct < 0.9) return "warning"
   return "danger"
 }
-
-export function shortenId(id: string | null, length = 8): string {
-  if (!id) return "unknown"
-  return id.slice(0, length)
-}
-
-// API workspace name wins, then a locally configured label, then the raw id.
-export function workspaceLabel(
-  workspace: string | null,
-  name: string | null,
-  labels: Readonly<Record<string, string>>,
-): string {
-  if (name) return name
-  const configured = workspace ? labels[workspace] : undefined
-  return configured ?? shortenId(workspace)
-}

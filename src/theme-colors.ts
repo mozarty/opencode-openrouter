@@ -22,7 +22,6 @@ export type Palette = {
   value: string
   today: string
   average: string
-  forecast: string
   warning: string
   danger: string
   success: string
@@ -95,8 +94,8 @@ export function withAlpha(hex: string, alpha: number): string {
 }
 
 // Each metric gets its own hue from the theme instead of one flat text color:
-// accent chrome, info "today", categorical "average", success "forecast", plus
-// the theme's warning/danger hues for budget pressure.
+// accent chrome, info "today", categorical "average", plus the theme's
+// success/warning/danger hues for the remaining balance and budget pressure.
 export function buildPalette(tokens: PaletteTokens, options: { accentOverride?: string | null } = {}): Palette {
   const accent = options.accentOverride ?? toHex(tokens.accent)
   return {
@@ -105,7 +104,6 @@ export function buildPalette(tokens: PaletteTokens, options: { accentOverride?: 
     value: toHex(tokens.base),
     today: toHex(tokens.info),
     average: toHex(tokens.secondary),
-    forecast: toHex(tokens.success),
     warning: toHex(tokens.warning),
     danger: toHex(tokens.danger),
     success: toHex(tokens.success),

@@ -52,7 +52,6 @@ describe("buildPalette", () => {
       value: "#bfbdb6",
       today: "#39bae6",
       average: "#d2a6ff",
-      forecast: "#7fd962",
       warning: "#e6b673",
       danger: "#d95757",
       success: "#7fd962",

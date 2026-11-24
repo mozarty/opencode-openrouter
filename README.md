@@ -1,26 +1,24 @@
 # opencode-openrouter
 
 An [OpenCode](https://opencode.ai) TUI plugin that puts your OpenRouter spend in
-the sidebar: today's cost, this month's cost, a monthly budget bar and a
-month-end forecast, refreshed while you work.
+the sidebar: today's cost, this month's cost, a monthly budget bar and what is
+left of the budget, refreshed while you work.
 
 ```
-╭─ OpenRouter ─────────────────╮
-│ ◆ Hackathon         $12.40   │
-│                              │
-│  Today      $1.20            │
-│  ──────────────────────────  │
-│  Avg/day    $0.82            │
-│  ──────────────────────────  │
-│  Forecast   $24.60           │
-│  ──────────────────────────  │
-│  Month      $12.40 / $50.00  │
-│             ███░░░░░░░░░ 25% │
-╰──────────────────────────────╯
+╭─ OpenRouter ────────────────╮
+│  Today      $1.20           │
+│  ─────────────────────────  │
+│  Remaining  $37.60          │
+│  ─────────────────────────  │
+│  Month      $12.40 / $50.00 │
+│             ███░░░░░░░░ 25% │
+│  ─────────────────────────  │
+│  Avg/day    $0.82           │
+╰─────────────────────────────╯
 ```
 
-The bar turns amber at 70% of the budget and red at 90%. When the remaining
-balance goes negative it is shown in red as an overrun.
+The bar turns amber at 70% of the budget and red at 90%. The `Remaining` row
+turns red when the budget is overspent.
 
 ## Requirements
 
@@ -64,9 +62,7 @@ Options are passed through the plugin entry:
 
 | Option              | Type                     | Default     | Description                                                                                  |
 | ------------------- | ------------------------ | ----------- | -------------------------------------------------------------------------------------------- |
-| `managementKey`     | `string`                 | –           | OpenRouter management key, used to resolve workspace names. Prefer the env var for secrets.   |
 | `monthlyLimit`      | `number`                 | –           | Monthly USD cap used when the API reports no budget for the key.                              |
-| `workspaces`        | `Record<string,string>`  | `{}`        | Local labels for workspace ids, for keys that cannot list workspaces.                         |
 | `refreshIntervalMs` | `number`                 | `30000`     | Poll interval, clamped to 10s–1h. Spend is also refreshed after every model turn.             |
 | `title`             | `string`                 | `OpenRouter`| Box title.                                                                                    |
 | `accent`            | `string`                 | theme       | Hex colour for the frame, title and dividers (`#rgb`, `#rrggbb` or `#rrggbbaa`).              |
@@ -78,11 +74,10 @@ readable and native in every theme instead of relying on hardcoded colours:
 
 | Element        | Theme source                     |
 | -------------- | -------------------------------- |
-| Frame, `◆`, dividers | most colourful `hue.accent` step that reads against the background |
+| Frame, dividers | most colourful `hue.accent` step that reads against the background |
 | Labels         | `text.base`                      |
 | Today          | `text.feedback.info`             |
 | Avg/day        | the `categorical` hue furthest in colour from the accent, by the same rule |
-| Forecast       | `text.feedback.success`          |
 | Month + bar    | `text.base`, overridden by `feedback.warning` at 70% and `feedback.error` at 90% |
 | Remaining      | `feedback.success`, `feedback.error` when negative |
 
@@ -97,24 +92,21 @@ the theme.
 
 ### Environment
 
-| Variable                     | Description                                            |
-| ---------------------------- | ------------------------------------------------------ |
-| `OPENROUTER_API_KEY`         | Key used for usage requests, overriding the stored one. |
-| `OPENROUTER_MANAGEMENT_KEY`  | Same as the `managementKey` option.                     |
+| Variable             | Description                                            |
+| -------------------- | ------------------------------------------------------ |
+| `OPENROUTER_API_KEY` | Key used for usage requests, overriding the stored one. |
 
 ## Where the numbers come from
 
 Every value is read from OpenRouter's own API, not estimated locally:
 
 - `GET /api/v1/auth/key` → `usage_daily`, `usage_monthly`, `budgets[]`,
-  `effective_budget`, `limit`, `limit_remaining`, `workspace_id`.
-- `GET /api/v1/workspaces` (only with a management key) → workspace names.
+  `effective_budget`, `limit`, `limit_remaining`.
 
 The monthly budget is chosen in this order: the member-scoped monthly budget,
 the workspace default member budget, then the key-level limit. A budget only
 counts for the current month when it resets at the next UTC month boundary.
-Average daily spend uses elapsed UTC days including today, and the forecast
-scales that pace to the length of the month.
+Average daily spend uses elapsed UTC days including today.
 
 Settings show a `-` when the API does not report a field. Free-tier keys often
 have no `usage_daily`.

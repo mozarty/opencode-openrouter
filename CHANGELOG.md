@@ -10,27 +10,26 @@ First public release, extracted from a personal OpenCode config.
 
 ### Added
 
-- Sidebar widget showing today's OpenRouter spend, monthly spend, average
-  daily spend and a month-end forecast.
-- Monthly budget bar with usage severity thresholds (70% nudge, 90% warning)
-  and an overrun marker when the remaining balance goes negative.
+- Sidebar widget showing today's OpenRouter spend, monthly spend, average daily
+  spend and the remaining budget.
+- Monthly budget bar with usage severity thresholds (70% nudge, 90% warning).
 - Budget resolution from the OpenRouter API (`effective_budget`, member-scoped
   `budgets`, then key-level `limit`), falling back to a configured
   `monthlyLimit`.
-- Workspace names from the OpenRouter management API, with a local
-  `workspaces` label map as a fallback.
 - `openrouter.refresh` palette command for an immediate refresh.
-- Plugin options: `managementKey`, `monthlyLimit`, `workspaces`,
-  `refreshIntervalMs`, `title`, `accent`.
-- Environment variables: `OPENROUTER_API_KEY`, `OPENROUTER_MANAGEMENT_KEY`.
-- Tests for budget resolution, pace projection, options parsing, palette
+- Plugin options: `monthlyLimit`, `refreshIntervalMs`, `title`, `accent`.
+- Environment variable: `OPENROUTER_API_KEY`.
+- Tests for budget resolution, average daily spend, options parsing, palette
   mapping and formatting.
 
 ### Changed
 
+- The sidebar no longer resolves workspace names: the management key, the
+  `/api/v1/workspaces` lookup and its cache are gone, and a `Remaining` row
+  shows the balance left instead.
 - Every metric takes a different hue from the active theme — accent frame,
-  info "Today", categorical "Avg/day", success "Forecast" — instead of one flat
-  text colour, with warning/danger overriding on budget pressure.
+  info "Today", categorical "Avg/day" — instead of one flat text colour, with
+  warning/danger overriding on budget pressure.
 - Labels use the theme's body text colour so the left column stays readable
   instead of fading out at `text.muted`.
 - The accent and categorical hues are picked by colourfulness against the
