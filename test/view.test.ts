@@ -31,6 +31,7 @@ describe("usageView", () => {
       { kind: "row", label: "Today", value: "$1.20", tone: "today" },
       { kind: "rule" },
       { kind: "row", label: "Month", value: "$24.00", tone: "value" },
+      { kind: "rule" },
       { kind: "row", label: "Avg/day", value: "$1.00", tone: "average" },
     ])
     assert.equal(view.width, 26)
@@ -40,6 +41,10 @@ describe("usageView", () => {
     const view = usageView({ ...spent, budget: { window: "week", total: 50, spend: 12.5, remaining: 37.5 } }, null, NOW)
 
     assert.deepEqual(labels(view), ["Today", "Month", "Avg/day", "Remaining", "Week cap", ""])
+    assert.deepEqual(
+      view.lines.map((line) => line.kind),
+      ["row", "rule", "row", "rule", "row", "rule", "row", "rule", "row", "row"],
+    )
     assert.deepEqual(rowAt(view, -2), {
       kind: "row",
       label: "Week cap",
@@ -87,7 +92,7 @@ describe("usageView", () => {
   it("colours an overspent balance as an error", () => {
     const view = usageView({ ...spent, budget: { window: "month", total: 100, spend: 130, remaining: -30 } }, null, NOW)
 
-    assert.deepEqual(rowAt(view, -3), { kind: "row", label: "Remaining", value: "-$30.00", tone: "danger" })
+    assert.deepEqual(rowAt(view, -4), { kind: "row", label: "Remaining", value: "-$30.00", tone: "danger" })
   })
 
   it("labels a lifetime cap without a window", () => {

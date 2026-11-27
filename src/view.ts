@@ -47,6 +47,7 @@ export function usageView(data: Snapshot, monthlyLimit: number | null, now = new
     { kind: "row", label: "Today", value: money(data.daily), tone: "today" },
     { kind: "rule" },
     { kind: "row", label: "Month", value: money(data.monthly), tone: "value" },
+    { kind: "rule" },
     { kind: "row", label: "Avg/day", value: money(averagePerDay(data.monthly, now)), tone: "average" },
   ]
 
@@ -59,6 +60,7 @@ export function usageView(data: Snapshot, monthlyLimit: number | null, now = new
         value: money(budget.remaining),
         tone: budget.remaining < 0 ? "danger" : "success",
       },
+      { kind: "rule" },
       {
         kind: "row",
         label: capLabel(budget.window),
